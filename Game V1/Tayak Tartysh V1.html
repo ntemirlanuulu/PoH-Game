@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tayak Tartysh — The Nomadic Pulling Challenge</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="stage">
+    <canvas id="game" width="1280" height="720"></canvas>
+
+    <!-- ===== In-round HUD ===== -->
+    <div id="hud">
+      <div class="hud-top">
+        <div class="nameplate player">
+          <div class="np-name">YOU</div>
+          <div class="np-sub">BLUE CORNER</div>
+          <div class="pips" id="playerPips"><i></i><i></i></div>
+        </div>
+
+        <div class="hud-center">
+          <div class="round-row">
+            <span id="roundLabel">ROUND 1</span>
+            <span class="score" id="scoreLabel">0 : 0</span>
+          </div>
+          <div class="tug" id="tug">
+            <div class="tug-zone left">WIN</div>
+            <div class="tug-zone right">WIN</div>
+            <div class="tug-fill" id="tugFill"></div>
+            <div class="tug-center"></div>
+            <div class="tug-marker" id="tugMarker"><span></span></div>
+          </div>
+        </div>
+
+        <div class="nameplate ai">
+          <div class="np-name">AI WRESTLER</div>
+          <div class="np-sub" id="aiDiff">SKILLED WRESTLER</div>
+          <div class="pips" id="aiPips"><i></i><i></i></div>
+        </div>
+      </div>
+
+      <div id="alert"></div>
+
+      <div class="hud-bottom" id="spaceHint">
+        <div class="space-row"><kbd id="spaceKey">SPACE</kbd><span>TO PULL</span></div>
+        <div class="power">
+          <span class="power-label">PULL POWER</span>
+          <div class="power-bar">
+            <div class="power-fill" id="powerFill"></div>
+            <div class="ai-tick" id="aiTick" title="Opponent force"></div>
+          </div>
+          <span class="tap-rate"><b id="tapRate">0.0</b> taps/s</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="countdown"></div>
+
+    <!-- ===== Main menu ===== -->
+    <section id="menu" class="screen show">
+      <div class="panel menu-panel">
+        <h1 class="title">TAYAK TARTYSH</h1>
+        <p class="subtitle">The Nomadic Pulling Challenge</p>
+        <button class="btn btn-play" id="playBtn">PLAY GAME</button>
+        <div class="diff">
+          <div class="diff-label">DIFFICULTY</div>
+          <div class="diff-row">
+            <button class="diff-btn" data-diff="easy"><b>EASY</b><small>Village Rookie</small></button>
+            <button class="diff-btn selected" data-diff="medium"><b>MEDIUM</b><small>Skilled Wrestler</small></button>
+            <button class="diff-btn" data-diff="hard"><b>HARD</b><small>Nomadic Champion</small></button>
+          </div>
+        </div>
+        <button class="btn btn-secondary" id="howBtn">HOW TO PLAY</button>
+        <p class="menu-foot"><kbd>ENTER</kbd> start &nbsp;·&nbsp; <kbd>M</kbd> mute</p>
+      </div>
+    </section>
+
+    <!-- ===== How to play ===== -->
+    <section id="howto" class="screen">
+      <div class="panel card howto-panel">
+        <h2 class="card-title">HOW TO PLAY</h2>
+        <p class="howto-lead">Press <kbd>SPACE</kbd> repeatedly to pull the wooden stick toward you. Your opponent will fight back. Pull harder and faster to win!</p>
+        <div class="tips">
+          <div class="tip tip-blue">
+            <div class="tip-head">TAP, DON'T HOLD</div>
+            <p>Every fresh press adds pulling power. Holding the key does nothing, and your power fades when you slow down.</p>
+          </div>
+          <div class="tip tip-red">
+            <div class="tip-head">SURVIVE ATTACKS</div>
+            <p>A red <b>!</b> warns of a big counter-pull. Tap even faster to hold your ground.</p>
+          </div>
+          <div class="tip tip-green">
+            <div class="tip-head">PUNISH FATIGUE</div>
+            <p>After attacking, your rival gets tired. That's your moment: go all out!</p>
+          </div>
+        </div>
+        <p class="howto-foot">Drag the stick all the way to your side to win a round. <b>Best of three</b>: win 2 rounds to become champion.</p>
+        <button class="btn btn-secondary" id="backBtn">BACK</button>
+      </div>
+    </section>
+
+    <!-- ===== Round result ===== -->
+    <section id="roundEnd" class="screen result">
+      <div class="panel result-panel">
+        <div class="result-title" id="roundTitle">ROUND WON!</div>
+        <div class="result-sub" id="roundSub">YOU 1 : 0 AI</div>
+      </div>
+      <div class="result-actions">
+        <button class="btn btn-play" id="nextBtn">NEXT ROUND</button>
+        <div class="result-hint" id="roundHint">press <kbd>ENTER</kbd></div>
+      </div>
+    </section>
+
+    <!-- ===== Match result ===== -->
+    <section id="matchEnd" class="screen result">
+      <div class="panel result-panel">
+        <svg id="trophy" class="trophy" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M18 8h28v10c0 10-6 18-14 18S18 28 18 18z" fill="#ffd23f" stroke="#2b1a14" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M18 12H9c0 9 4 14 11 15M46 12h9c0 9-4 14-11 15" fill="none" stroke="#2b1a14" stroke-width="3" stroke-linecap="round"/>
+          <path d="M28 36h8v8h-8z" fill="#f5a524" stroke="#2b1a14" stroke-width="3"/>
+          <path d="M20 44h24v8H20z" fill="#b8322a" stroke="#2b1a14" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M26 15l3 6 6 1-4 4 1 6-6-3" fill="#fff6c8"/>
+        </svg>
+        <div class="result-title big" id="matchTitle">YOU ARE THE CHAMPION!</div>
+        <div class="result-sub" id="matchSub">FINAL SCORE 2 : 1</div>
+      </div>
+      <div class="result-actions">
+        <div class="btn-row">
+          <button class="btn btn-play" id="rematchBtn">REMATCH</button>
+          <button class="btn btn-secondary" id="menuBtn">MAIN MENU</button>
+        </div>
+        <div class="result-hint"><kbd>ENTER</kbd> rematch &nbsp;·&nbsp; <kbd>ESC</kbd> menu</div>
+      </div>
+    </section>
+
+    <button id="muteBtn" class="mute" aria-label="Toggle sound" title="Toggle sound (M)">
+      <svg viewBox="0 0 24 24" class="ico-on"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <svg viewBox="0 0 24 24" class="ico-off"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 9l6 6M22 9l-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
