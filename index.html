@@ -75,6 +75,7 @@
           </div>
         </div>
         <button class="btn btn-secondary" id="howBtn" data-i18n="howBtn">HOW TO PLAY</button>
+        <button class="btn btn-secondary btn-faq" id="faqBtn" data-i18n="faqBtn">FAQ</button>
         <p class="menu-foot" data-i18n-html="menuFoot"><kbd>ENTER</kbd> start &nbsp;·&nbsp; <kbd>M</kbd> mute</p>
       </div>
     </section>
@@ -100,6 +101,28 @@
         </div>
         <p class="howto-foot" data-i18n-html="howFoot">Drag the stick all the way to your side to win a round. <b>Best of three</b>: win 2 rounds to become champion.</p>
         <button class="btn btn-secondary" id="backBtn" data-i18n="back">BACK</button>
+      </div>
+    </section>
+
+    <!-- ===== FAQ ===== -->
+    <section id="faq" class="screen">
+      <div class="panel card faq-panel">
+        <h2 class="card-title faq-title" id="faqTitle" data-i18n="faqTitle">FREQUENTLY ASKED QUESTIONS</h2>
+        <div class="faq-list">
+          <div class="faq-item faq-blue">
+            <button class="faq-q" aria-expanded="false"><span data-i18n="q1">What is the game?</span><i class="faq-icon" aria-hidden="true"></i></button>
+            <div class="faq-a"><div><p data-i18n="a1"></p></div></div>
+          </div>
+          <div class="faq-item faq-red">
+            <button class="faq-q" aria-expanded="false"><span data-i18n="q2">How do I switch languages?</span><i class="faq-icon" aria-hidden="true"></i></button>
+            <div class="faq-a"><div><p data-i18n="a2"></p></div></div>
+          </div>
+          <div class="faq-item faq-green">
+            <button class="faq-q" aria-expanded="false"><span data-i18n="q3">Who created the game?</span><i class="faq-icon" aria-hidden="true"></i></button>
+            <div class="faq-a"><div><p data-i18n="a3"></p></div></div>
+          </div>
+        </div>
+        <button class="btn btn-secondary" id="faqBackBtn" data-i18n="back">BACK</button>
       </div>
     </section>
 
@@ -137,7 +160,7 @@
       </div>
     </section>
 
-    <!-- ===== Language switcher (menu and how-to screens) ===== -->
+    <!-- ===== Language switcher (menu, how-to and FAQ screens) ===== -->
     <div id="lang" class="lang show">
       <button id="langBtn" class="lang-btn" aria-haspopup="true" aria-expanded="false" data-i18n-title="language" title="Language">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" fill="none" stroke="currentColor" stroke-width="2"/></svg>
