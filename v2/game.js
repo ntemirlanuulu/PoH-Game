@@ -455,7 +455,7 @@ function bootGame() {
       q2: '如何切换语言？',
       a2: '点击主菜单右上角的地球按钮（在这几个帮助页面上也能看到）。选择 English、Кыргызча、Русский 或 中文，整个游戏会立即切换，并且会记住你的选择。',
       q3: '谁制作了这款游戏？',
-      a3: '这款游戏由努尔苏丹（Nursultan）与 Claude AI 合作制作，是他为“Perspectives on the Humanities”课程完成的作品。'
+      a3: '这款游戏由铁御龙（Nursultan）与 Claude AI 合作制作，是他为“Perspectives on the Humanities”课程完成的作品。'
     }
   };
   let lang = 'en';
