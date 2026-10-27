@@ -15,16 +15,17 @@
    alone, any rate above ~2 taps/s eventually saturates at playerMaxForce, so
    4 taps/s and 8 taps/s would end up equally strong. The drag term makes the
    steady-state force depend on tap rate:  F ≈ (rate·impulse − decay) / drag
-   → 3 t/s ≈ 5, 4 t/s ≈ 7.5, 5 t/s ≈ 10, 6 t/s ≈ 12.5, 8 t/s ≈ 17.5
+   → 2 t/s ≈ 6, 3 t/s ≈ 10.5, 4 t/s ≈ 14.8, 5 t/s ≈ 19.2, 6+ t/s ≈ 24 (cap)
+   V2: impulse raised from 1.5 so ~4 taps/s now does what ~7 taps/s used to.
    --------------------------------------------------------------------------- */
 const BALANCE = {
-  playerImpulse: 1.5,
+  playerImpulse: 2.6,
   playerForceDecay: 1.5,      // flat decay, force per second
   playerForceDrag: 0.6,       // proportional decay, 1/second
-  playerMaxForce: 18,
+  playerMaxForce: 24,
   minTapInterval: 0.03,       // ignore key-switch chatter faster than this
-  positionScale: 1.8,
-  maxPositionSpeed: 18,
+  positionScale: 2.2,
+  maxPositionSpeed: 24,
   positionDamping: 5,
   roundLimit: 100,
   desperationZone: 72,        // AI may attempt a last stand at pullPosition <= -72
@@ -295,7 +296,7 @@ function bootGame() {
   const S = GameState;
   const W = 1280, H = 720, TAU = Math.PI * 2;
   const INK = '#2b1a14';
-  const FONT = "'Lilita One', 'Arial Black', Impact, sans-serif";
+  const FONT = "'Lilita One', 'Rubik', 'Noto Sans SC', 'PingFang SC', 'Arial Black', Impact, sans-serif";
 
   // Arena coordinates (before the 1.3x arena zoom around the board's foot).
   const ARENA = { groundY: 590, boardX: 640, boardTop: 508, scale: 1.3, stickY: 468, stickRange: 76, stickHalf: 92 };
@@ -326,8 +327,153 @@ function bootGame() {
     roundTitle: $('roundTitle'), roundSub: $('roundSub'), nextBtn: $('nextBtn'), roundHint: $('roundHint'),
     matchTitle: $('matchTitle'), matchSub: $('matchSub'), rematchBtn: $('rematchBtn'), menuBtn: $('menuBtn'),
     trophy: $('trophy'), playBtn: $('playBtn'), howBtn: $('howBtn'), backBtn: $('backBtn'), muteBtn: $('muteBtn'),
-    diffBtns: Array.from(document.querySelectorAll('.diff-btn'))
+    diffBtns: Array.from(document.querySelectorAll('.diff-btn')), title: document.querySelector('#menu .title'),
+    lang: $('lang'), langBtn: $('langBtn'), langCode: $('langCode'),
+    langItems: Array.from(document.querySelectorAll('#langMenu [data-lang]'))
   };
+
+  /* ---------- Languages ---------- */
+  const STRINGS = {
+    en: {
+      code: 'EN', title: 'TAYAK TARTYSH', subtitle: 'The Nomadic Pulling Challenge', play: 'PLAY GAME',
+      difficulty: 'DIFFICULTY', easy: 'EASY', medium: 'MEDIUM', hard: 'HARD',
+      easyTitle: 'Village Rookie', mediumTitle: 'Skilled Wrestler', hardTitle: 'Nomadic Champion',
+      howBtn: 'HOW TO PLAY', menuFoot: '<kbd>ENTER</kbd> start &nbsp;·&nbsp; <kbd>M</kbd> mute',
+      howTitle: 'HOW TO PLAY',
+      howLead: 'Press <kbd>SPACE</kbd> repeatedly to pull the wooden stick toward you. Your opponent will fight back. Pull harder and faster to win!',
+      tip1Head: "TAP, DON'T HOLD", tip1: 'Every fresh press adds pulling power. Holding the key does nothing, and your power fades when you slow down.',
+      tip2Head: 'SURVIVE ATTACKS', tip2: 'A red <b>!</b> warns of a big counter-pull. Tap even faster to hold your ground.',
+      tip3Head: 'PUNISH FATIGUE', tip3: "After attacking, your rival gets tired. That's your moment: go all out!",
+      howFoot: 'Drag the stick all the way to your side to win a round. <b>Best of three</b>: win 2 rounds to become champion.',
+      back: 'BACK', you: 'YOU', blueCorner: 'BLUE CORNER', opponent: 'OPPONENT', win: 'WIN',
+      round: 'ROUND {n}', finalRound: 'FINAL ROUND', go: 'PULL!',
+      spaceKey: 'SPACE', toPull: 'TO PULL', pullPower: 'PULL POWER', tapsPerSec: 'taps/s', opponentForce: 'Opponent force',
+      roundWon: 'ROUND WON!', roundLost: 'ROUND LOST!', roundSub: 'YOU {p} : {a} OPPONENT',
+      nextRound: 'NEXT ROUND', pressEnter: 'press <kbd>ENTER</kbd>',
+      champ: 'YOU ARE THE CHAMPION!', defeat: 'DEFEAT — TRY AGAIN!', finalScore: 'FINAL SCORE {p} : {a}  ·  {diff}',
+      rematch: 'REMATCH', mainMenu: 'MAIN MENU', matchHint: '<kbd>ENTER</kbd> rematch &nbsp;·&nbsp; <kbd>ESC</kbd> menu',
+      attackIncoming: 'ATTACK INCOMING!', attackNow: 'OPPONENT ATTACKS! HOLD ON!', lastStand: '!! LAST STAND !!',
+      desperation: 'DESPERATION ATTACK!', tired: 'OPPONENT TIRED — PULL NOW!',
+      popYes: 'YES!', popOof: 'OOF!', popHyaa: 'HYAA!', popLastStand: 'LAST STAND!', popRaaagh: 'RAAAGH!', popHuff: 'huff... huff...',
+      muteTitle: 'Toggle sound (M)', language: 'Language'
+    },
+    ky: {
+      code: 'KG', title: 'ТАЯК ТАРТЫШ', subtitle: 'Көчмөндөрдүн күч сынашуусу', play: 'ОЙНОО',
+      difficulty: 'ДЕҢГЭЭЛ', easy: 'ОҢОЙ', medium: 'ОРТО', hard: 'ООР',
+      easyTitle: 'Айылдын жаш балбаны', mediumTitle: 'Тажрыйбалуу балбан', hardTitle: 'Көчмөн чемпиону',
+      howBtn: 'ОЮН ЭРЕЖЕСИ', menuFoot: '<kbd>ENTER</kbd> баштоо &nbsp;·&nbsp; <kbd>M</kbd> үн',
+      howTitle: 'ОЮН ЭРЕЖЕСИ',
+      howLead: '<kbd>БОШТУК</kbd> баскычын улам-улам басып, жыгач таякты өзүңө тарт. Атаандашың каршылык көрсөтөт. Жеңиш үчүн катуураак жана тезирээк тарт!',
+      tip1Head: 'БАС, КАРМАБА', tip1: 'Ар бир жаңы басуу күч кошот. Баскычты басып туруу эч нерсе бербейт, ал эми жайласаң күчүң азаят.',
+      tip2Head: 'ЧАБУУЛГА ЧЫДА', tip2: 'Кызыл <b>!</b> белгиси катуу каршы тартууну эскертет. Ордуңда туруу үчүн дагы тезирээк бас.',
+      tip3Head: 'ЧАРЧАГАНЫН ПАЙДАЛАН', tip3: 'Чабуулдан кийин атаандашың чарчайт. Бул сенин учуруң: бар күчүңдү жумша!',
+      howFoot: 'Раундду утуш үчүн таякты толугу менен өз тарабыңа тарт. <b>Үч раунддан экөөсү</b>: чемпион болуш үчүн 2 раундду ут.',
+      back: 'АРТКА', you: 'СЕН', blueCorner: 'КӨК БУРЧ', opponent: 'АТААНДАШ', win: 'ЖЕҢИШ',
+      round: '{n}-РАУНД', finalRound: 'АКЫРКЫ РАУНД', go: 'ТАРТ!',
+      spaceKey: 'БОШТУК', toPull: 'ТАРТУУ ҮЧҮН', pullPower: 'ТАРТУУ КҮЧҮ', tapsPerSec: 'басуу/сек', opponentForce: 'Атаандаштын күчү',
+      roundWon: 'РАУНДДУ УТТУҢ!', roundLost: 'РАУНДДУ УТТУРДУҢ!', roundSub: 'СЕН {p} : {a} АТААНДАШ',
+      nextRound: 'КИЙИНКИ РАУНД', pressEnter: '<kbd>ENTER</kbd> бас',
+      champ: 'СЕН ЧЕМПИОНСУҢ!', defeat: 'ЖЕҢИЛДИҢ — КАЙРА АРАКЕТ КЫЛ!', finalScore: 'ЖЫЙЫНТЫК {p} : {a}  ·  {diff}',
+      rematch: 'КАЙРА ОЙНОО', mainMenu: 'БАШКЫ МЕНЮ', matchHint: '<kbd>ENTER</kbd> кайра ойноо &nbsp;·&nbsp; <kbd>ESC</kbd> меню',
+      attackIncoming: 'ЧАБУУЛ КЕЛЕ ЖАТАТ!', attackNow: 'АТААНДАШ ЧАБУУЛДАДЫ! ЧЫДА!', lastStand: '!! АКЫРКЫ АРАКЕТ !!',
+      desperation: 'ЖАН ДАЛБАС ЧАБУУЛ!', tired: 'АТААНДАШ ЧАРЧАДЫ — АЗЫР ТАРТ!',
+      popYes: 'УРА!', popOof: 'ОЙ!', popHyaa: 'ХАА!', popLastStand: 'АКЫРКЫ АРАКЕТ!', popRaaagh: 'АРРРР!', popHuff: 'уф... уф...',
+      muteTitle: 'Үндү күйгүзүү/өчүрүү (M)', language: 'Тил'
+    },
+    ru: {
+      code: 'RU', title: 'ТАЯК ТАРТЫШ', subtitle: 'Испытание силы кочевников', play: 'ИГРАТЬ',
+      difficulty: 'СЛОЖНОСТЬ', easy: 'ЛЁГКИЙ', medium: 'СРЕДНИЙ', hard: 'СЛОЖНЫЙ',
+      easyTitle: 'Сельский новичок', mediumTitle: 'Опытный борец', hardTitle: 'Чемпион кочевников',
+      howBtn: 'КАК ИГРАТЬ', menuFoot: '<kbd>ENTER</kbd> старт &nbsp;·&nbsp; <kbd>M</kbd> звук',
+      howTitle: 'КАК ИГРАТЬ',
+      howLead: 'Быстро нажимай <kbd>ПРОБЕЛ</kbd>, чтобы тянуть деревянную палку к себе. Соперник будет сопротивляться. Тяни сильнее и быстрее, чтобы победить!',
+      tip1Head: 'ЖМИ, НЕ ДЕРЖИ', tip1: 'Каждое новое нажатие добавляет силы. Удержание клавиши ничего не даёт, а если замедлишься, сила падает.',
+      tip2Head: 'ВЫДЕРЖИ АТАКУ', tip2: 'Красный <b>!</b> предупреждает о мощном рывке соперника. Жми ещё быстрее, чтобы устоять.',
+      tip3Head: 'ЛОВИ УСТАЛОСТЬ', tip3: 'После атаки соперник устаёт. Это твой момент: выложись по полной!',
+      howFoot: 'Перетяни палку на свою сторону, чтобы выиграть раунд. <b>До двух побед</b>: выиграй 2 раунда и стань чемпионом.',
+      back: 'НАЗАД', you: 'ТЫ', blueCorner: 'СИНИЙ УГОЛ', opponent: 'СОПЕРНИК', win: 'ПОБЕДА',
+      round: 'РАУНД {n}', finalRound: 'ФИНАЛЬНЫЙ РАУНД', go: 'ТЯНИ!',
+      spaceKey: 'ПРОБЕЛ', toPull: 'ЧТОБЫ ТЯНУТЬ', pullPower: 'СИЛА ТЯГИ', tapsPerSec: 'нажатий/с', opponentForce: 'Сила соперника',
+      roundWon: 'РАУНД ВЫИГРАН!', roundLost: 'РАУНД ПРОИГРАН!', roundSub: 'ТЫ {p} : {a} СОПЕРНИК',
+      nextRound: 'СЛЕДУЮЩИЙ РАУНД', pressEnter: 'нажми <kbd>ENTER</kbd>',
+      champ: 'ТЫ ЧЕМПИОН!', defeat: 'ПОРАЖЕНИЕ — ПОПРОБУЙ ЕЩЁ!', finalScore: 'ИТОГОВЫЙ СЧЁТ {p} : {a}  ·  {diff}',
+      rematch: 'РЕВАНШ', mainMenu: 'ГЛАВНОЕ МЕНЮ', matchHint: '<kbd>ENTER</kbd> реванш &nbsp;·&nbsp; <kbd>ESC</kbd> меню',
+      attackIncoming: 'ГОТОВИТСЯ АТАКА!', attackNow: 'АТАКА СОПЕРНИКА! ДЕРЖИСЬ!', lastStand: '!! ПОСЛЕДНИЙ РЫВОК !!',
+      desperation: 'ОТЧАЯННАЯ АТАКА!', tired: 'СОПЕРНИК УСТАЛ — ТЯНИ!',
+      popYes: 'ДА!', popOof: 'ОХ!', popHyaa: 'ХЭЙ!', popLastStand: 'ПОСЛЕДНИЙ РЫВОК!', popRaaagh: 'РРРАА!', popHuff: 'уф... уф...',
+      muteTitle: 'Вкл/выкл звук (M)', language: 'Язык'
+    },
+    zh: {
+      code: '中文', title: '拔棍大赛', subtitle: '游牧民族的力量较量', play: '开始游戏',
+      difficulty: '难度', easy: '简单', medium: '中等', hard: '困难',
+      easyTitle: '村里新手', mediumTitle: '熟练摔跤手', hardTitle: '游牧冠军',
+      howBtn: '玩法说明', menuFoot: '<kbd>ENTER</kbd> 开始 &nbsp;·&nbsp; <kbd>M</kbd> 静音',
+      howTitle: '玩法说明',
+      howLead: '连续按 <kbd>空格键</kbd>，把木棍拉向自己。对手会奋力反击。拉得更猛、更快才能获胜！',
+      tip1Head: '连按，别按住', tip1: '每次重新按下都会增加拉力。按住不放没有用，按得慢了力量就会减弱。',
+      tip2Head: '顶住进攻', tip2: '红色 <b>!</b> 表示对手即将猛力回拉。按得更快才能守住阵地。',
+      tip3Head: '趁其疲惫', tip3: '对手进攻后会疲惫。这是你的机会：全力出击！',
+      howFoot: '把木棍完全拉到你这边即赢得一局。<b>三局两胜</b>：赢下 2 局即成为冠军。',
+      back: '返回', you: '你', blueCorner: '蓝方', opponent: '对手', win: '胜',
+      round: '第 {n} 局', finalRound: '决胜局', go: '拉！',
+      spaceKey: '空格键', toPull: '拉棍', pullPower: '拉力', tapsPerSec: '次/秒', opponentForce: '对手力量',
+      roundWon: '本局获胜！', roundLost: '本局失利！', roundSub: '你 {p} : {a} 对手',
+      nextRound: '下一局', pressEnter: '按 <kbd>ENTER</kbd>',
+      champ: '你是冠军！', defeat: '失败了，再试一次！', finalScore: '最终比分 {p} : {a}  ·  {diff}',
+      rematch: '再战一场', mainMenu: '主菜单', matchHint: '<kbd>ENTER</kbd> 再战 &nbsp;·&nbsp; <kbd>ESC</kbd> 菜单',
+      attackIncoming: '对手要进攻了！', attackNow: '对手进攻！顶住！', lastStand: '!! 背水一战 !!',
+      desperation: '拼死反扑！', tired: '对手累了，快拉！',
+      popYes: '好！', popOof: '哎哟！', popHyaa: '嘿呀！', popLastStand: '背水一战！', popRaaagh: '啊啊啊！', popHuff: '呼……呼……',
+      muteTitle: '声音开关 (M)', language: '语言'
+    }
+  };
+  let lang = 'en';
+  function t(key, vars) {
+    let str = STRINGS[lang][key] ?? STRINGS.en[key] ?? key;
+    if (vars) for (const k in vars) str = str.replace(`{${k}}`, vars[k]);
+    return str;
+  }
+  /** Shrink a single-line element's font until it fits maxW stage pixels (long translations). */
+  function fitText(el, maxW) {
+    el.style.fontSize = '';
+    const w = el.scrollWidth;
+    if (w > maxW) el.style.fontSize = (parseFloat(getComputedStyle(el).fontSize) * maxW / w).toFixed(1) + 'px';
+  }
+  /** The WIN zones are flex boxes, so measure their text with a Range (ratio is unaffected by stage scaling). */
+  function fitZones() {
+    document.querySelectorAll('.tug-zone').forEach((z) => {
+      z.style.fontSize = '';
+      const range = document.createRange();
+      range.selectNodeContents(z);
+      const ratio = range.getBoundingClientRect().width / z.getBoundingClientRect().width;
+      if (ratio > 0.84) z.style.fontSize = (parseFloat(getComputedStyle(z).fontSize) * 0.84 / ratio).toFixed(1) + 'px';
+    });
+  }
+  function refit() {
+    fitText(ui.title, 1120);
+    fitZones();
+  }
+  function applyLang(code) {
+    lang = STRINGS[code] ? code : 'en';
+    document.documentElement.lang = lang;
+    document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll('[data-i18n-html]').forEach((el) => { el.innerHTML = t(el.dataset.i18nHtml); });
+    document.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
+    ui.muteBtn.title = t('muteTitle');
+    ui.muteBtn.setAttribute('aria-label', t('muteTitle'));
+    ui.langCode.textContent = t('code');
+    ui.langItems.forEach((b) => b.classList.toggle('selected', b.dataset.lang === lang));
+    refit();
+    try { localStorage.setItem('tayak-lang', lang); } catch (e) { /* ignore */ }
+  }
+  function initialLang() {
+    try {
+      const saved = localStorage.getItem('tayak-lang');
+      if (saved && STRINGS[saved]) return saved;
+    } catch (e) { /* storage unavailable */ }
+    const nav = (navigator.language || 'en').slice(0, 2).toLowerCase();
+    return STRINGS[nav] ? nav : 'en';
+  }
 
   /* ---------- Small helpers ---------- */
   function mulberry32(a) {
@@ -2240,6 +2386,8 @@ function bootGame() {
     showScreen(ui.howto, s === S.HOW_TO_PLAY);
     showScreen(ui.matchEnd, s === S.MATCH_END);
     if (s !== S.ROUND_END) showScreen(ui.roundEnd, false);
+    ui.lang.classList.toggle('show', s === S.MENU || s === S.HOW_TO_PLAY);
+    setLangMenu(false);
     ui.hud.classList.toggle('show', s === S.COUNTDOWN || s === S.PLAYING || s === S.ROUND_END);
     ui.spaceHint.classList.toggle('off', s !== S.PLAYING && s !== S.COUNTDOWN);
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -2251,6 +2399,7 @@ function bootGame() {
     el.className = '';
     void el.offsetWidth; // restart CSS animation
     el.className = 'show ' + cls;
+    fitText(el, 1180);
   }
 
   function updateScoreUI() {
@@ -2264,7 +2413,7 @@ function bootGame() {
     game.aiWins = 0;
     game.round = 1;
     confetti.length = 0;
-    ui.aiDiff.textContent = B.ai[game.difficulty].title.toUpperCase();
+    ui.aiDiff.textContent = t(game.difficulty + 'Title').toUpperCase();
     startRound();
   }
 
@@ -2275,7 +2424,7 @@ function bootGame() {
     game.tapTimes.length = 0;
     game.tapRate = 0;
     stick.nudge = 0;
-    ui.roundLabel.textContent = `ROUND ${game.round}`;
+    ui.roundLabel.textContent = t('round', { n: game.round });
     updateScoreUI();
     setState(S.COUNTDOWN);
   }
@@ -2287,12 +2436,12 @@ function bootGame() {
     while (cd.step + 1 < CD_MARKS.length && cd.t >= CD_MARKS[cd.step + 1]) {
       cd.step++;
       if (cd.step === 0) {
-        showCountdown(game.round === 3 ? 'FINAL ROUND' : `ROUND ${game.round}`, 'round');
+        showCountdown(game.round === 3 ? t('finalRound') : t('round', { n: game.round }), 'round');
       } else if (cd.step < 4) {
         showCountdown(String(4 - cd.step), 'num');
         Sound.count();
       } else {
-        showCountdown('PULL!', 'go');
+        showCountdown(t('go'), 'go');
         Sound.go();
         setState(S.PLAYING); // input is accepted from this moment on
         game.crowdBoost = 0.8;
@@ -2316,7 +2465,7 @@ function bootGame() {
     Sound.grunt(winner === 'ai');
     spawnDust(ARENA.boardX, ARENA.groundY - 4, 14, 120);
     const loser = winner === 'player' ? rival : player;
-    addPopup(winner === 'player' ? 'YES!' : 'OOF!', loser.pose.head.x, loser.pose.head.y - 70, winner === 'player' ? '#7cc2ff' : '#ff6a5c', 38);
+    addPopup(winner === 'player' ? t('popYes') : t('popOof'), loser.pose.head.x, loser.pose.head.y - 70, winner === 'player' ? '#7cc2ff' : '#ff6a5c', 38);
   }
 
   function updateRoundEnd(dt) {
@@ -2325,9 +2474,10 @@ function bootGame() {
     if (!ei.overlay && ei.t > 1.6) {
       ei.overlay = true;
       const won = ei.winner === 'player';
-      ui.roundTitle.textContent = won ? 'ROUND WON!' : 'ROUND LOST!';
+      ui.roundTitle.textContent = won ? t('roundWon') : t('roundLost');
       ui.roundTitle.className = 'result-title ' + (won ? 'won' : 'lost');
-      ui.roundSub.textContent = `YOU ${game.playerWins} : ${game.aiWins} AI`;
+      fitText(ui.roundTitle, 1180);
+      ui.roundSub.textContent = t('roundSub', { p: game.playerWins, a: game.aiWins });
       ui.nextBtn.style.display = ei.matchOver ? 'none' : '';
       ui.roundHint.style.display = ei.matchOver ? 'none' : '';
       showScreen(ui.roundEnd, true);
@@ -2339,9 +2489,10 @@ function bootGame() {
   function goMatchEnd() {
     const won = game.playerWins > game.aiWins;
     setState(S.MATCH_END);
-    ui.matchTitle.textContent = won ? 'YOU ARE THE CHAMPION!' : 'DEFEAT — TRY AGAIN!';
+    ui.matchTitle.textContent = won ? t('champ') : t('defeat');
     ui.matchTitle.className = 'result-title big ' + (won ? 'champ' : 'lost');
-    ui.matchSub.textContent = `FINAL SCORE ${game.playerWins} : ${game.aiWins}  ·  ${B.ai[game.difficulty].title.toUpperCase()}`;
+    fitText(ui.matchTitle, 1160);
+    ui.matchSub.textContent = t('finalScore', { p: game.playerWins, a: game.aiWins, diff: t(game.difficulty + 'Title').toUpperCase() });
     ui.trophy.style.display = won ? '' : 'none';
     game.crowdBoost = won ? 6 : 2;
     if (won) { Sound.matchWin(); spawnConfetti(160); }
@@ -2380,25 +2531,25 @@ function bootGame() {
         Sound.attackStrike();
         game.shake = Math.max(game.shake, 6);
         stick.nudge += 7;
-        addPopup('HYAA!', hx, hy - 64, '#ff5a3c', 32);
+        addPopup(t('popHyaa'), hx, hy - 64, '#ff5a3c', 32);
         spawnDust(P.hip.x, ARENA.groundY - 4, 6);
         break;
       case 'desperationWarn':
         Sound.desperationWarn();
         game.shake = Math.max(game.shake, 3);
-        addPopup('LAST STAND!', hx, hy - 96, '#ffb02e', 30);
+        addPopup(t('popLastStand'), hx, hy - 96, '#ffb02e', 30);
         break;
       case 'desperationStrike':
         Sound.desperationStrike();
         game.shake = Math.max(game.shake, 12);
         game.flash = 0.7;
         stick.nudge += 10;
-        addPopup('RAAAGH!', hx, hy - 64, '#ff9a1f', 40);
+        addPopup(t('popRaaagh'), hx, hy - 64, '#ff9a1f', 40);
         spawnDust(P.hip.x, ARENA.groundY - 4, 10, 70);
         break;
       case 'recovery':
         Sound.recovery();
-        addPopup('huff... huff...', hx, hy - 60, '#e8e8f0', 22);
+        addPopup(t('popHuff'), hx, hy - 60, '#e8e8f0', 22);
         break;
     }
   }
@@ -2538,9 +2689,9 @@ function bootGame() {
     let text = '', cls = '';
     if (game.state === S.PLAYING) {
       const ai = r.ai;
-      if (ai.state === AIState.ATTACK) { text = ai.phase === 'windup' ? 'ATTACK INCOMING!' : 'AI ATTACK! HOLD ON!'; cls = 'danger'; }
-      else if (ai.state === AIState.DESPERATION) { text = ai.phase === 'windup' ? '!! LAST STAND !!' : 'DESPERATION ATTACK!'; cls = 'desperate'; }
-      else if (ai.state === AIState.RECOVERY) { text = 'OPPONENT TIRED — PULL NOW!'; cls = 'chance'; }
+      if (ai.state === AIState.ATTACK) { text = ai.phase === 'windup' ? t('attackIncoming') : t('attackNow'); cls = 'danger'; }
+      else if (ai.state === AIState.DESPERATION) { text = ai.phase === 'windup' ? t('lastStand') : t('desperation'); cls = 'desperate'; }
+      else if (ai.state === AIState.RECOVERY) { text = t('tired'); cls = 'chance'; }
     }
     const key = text + cls;
     if (key !== lastAlert) {
@@ -2666,6 +2817,7 @@ function bootGame() {
     if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); Sound.init(); onEnter(); }
     else if (e.code === 'KeyM') { Sound.init(); toggleMute(); }
     else if (e.code === 'Escape') {
+      if (ui.lang.classList.contains('open')) { setLangMenu(false); return; }
       if (game.state === S.HOW_TO_PLAY || game.state === S.MATCH_END) goMenu();
     }
   }, { capture: true });
@@ -2684,6 +2836,29 @@ function bootGame() {
   ui.menuBtn.addEventListener('click', () => { Sound.click(); goMenu(); });
   ui.muteBtn.addEventListener('click', () => { Sound.init(); toggleMute(); ui.muteBtn.blur(); });
   ui.muteBtn.classList.toggle('muted', Sound.muted);
+  function setLangMenu(open) {
+    ui.lang.classList.toggle('open', open);
+    ui.langBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  ui.langBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    Sound.init();
+    Sound.click();
+    setLangMenu(!ui.lang.classList.contains('open'));
+    ui.langBtn.blur();
+  });
+  ui.langItems.forEach((btn) => btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    Sound.click();
+    applyLang(btn.dataset.lang);
+    setLangMenu(false);
+    btn.blur();
+  }));
+  document.addEventListener('click', () => setLangMenu(false));
+  applyLang(initialLang());
+  // Cyrillic/Chinese fallback fonts load lazily, so re-fit once they arrive.
+  if (document.fonts) document.fonts.addEventListener('loadingdone', refit);
+
   ui.diffBtns.forEach((btn) => btn.addEventListener('click', () => {
     game.difficulty = btn.dataset.diff;
     ui.diffBtns.forEach((b) => b.classList.toggle('selected', b === btn));
