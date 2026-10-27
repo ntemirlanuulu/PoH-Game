@@ -13,8 +13,9 @@
   --gold: #ffd23f;
   --orange: #f59a1b;
   --cream: #fff6e0;
-  --display: 'Lilita One', 'Arial Black', 'Arial Rounded MT Bold', Impact, sans-serif;
-  --body: 'Nunito', 'Arial Rounded MT Bold', 'Helvetica Neue', Arial, sans-serif;
+  /* Lilita One is Latin-only: Cyrillic falls through to Rubik, Chinese to Noto Sans SC */
+  --display: 'Lilita One', 'Rubik', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Arial Black', Impact, sans-serif;
+  --body: 'Nunito', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Arial Rounded MT Bold', 'Helvetica Neue', Arial, sans-serif;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -681,3 +682,66 @@ kbd {
 .mute .ico-off { display: none; }
 .mute.muted .ico-on { display: none; }
 .mute.muted .ico-off { display: block; }
+
+/* ---------- Language switcher ---------- */
+
+.lang {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 6;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s ease, visibility 0s linear 0.25s;
+}
+.lang.show { opacity: 1; visibility: visible; transition: opacity 0.25s ease; }
+.lang-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  padding: 0 18px 0 14px;
+  border-radius: 26px;
+  border: 4px solid var(--ink);
+  background: linear-gradient(#fff8e6, #f0d9a8);
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 24px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.4);
+  outline: none;
+  transition: transform 0.12s;
+}
+.lang-btn:hover, .lang.open .lang-btn { transform: scale(1.06); }
+.lang-btn svg { width: 26px; height: 26px; }
+.lang-menu {
+  position: absolute;
+  top: 64px;
+  right: 0;
+  min-width: 190px;
+  padding: 6px;
+  border-radius: 16px;
+  border: 4px solid var(--ink);
+  background: #fff6e0;
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.35);
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+}
+.lang.open .lang-menu { display: flex; }
+.lang-menu button {
+  font-family: var(--body);
+  font-weight: 900;
+  font-size: 22px;
+  text-align: left;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  outline: none;
+}
+.lang-menu button:hover { background: #f0d9a8; }
+.lang-menu button.selected { background: var(--blue); color: #fff; }
