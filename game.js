@@ -91,6 +91,7 @@ const BALANCE = {
 const GameState = Object.freeze({
   MENU: 'menu',
   HOW_TO_PLAY: 'how_to_play',
+  FAQ: 'faq',
   COUNTDOWN: 'countdown',
   PLAYING: 'playing',
   ROUND_END: 'round_end',
@@ -328,6 +329,8 @@ function bootGame() {
     matchTitle: $('matchTitle'), matchSub: $('matchSub'), rematchBtn: $('rematchBtn'), menuBtn: $('menuBtn'),
     trophy: $('trophy'), playBtn: $('playBtn'), howBtn: $('howBtn'), backBtn: $('backBtn'), muteBtn: $('muteBtn'),
     diffBtns: Array.from(document.querySelectorAll('.diff-btn')), title: document.querySelector('#menu .title'),
+    faq: $('faq'), faqBtn: $('faqBtn'), faqBackBtn: $('faqBackBtn'), faqTitle: $('faqTitle'),
+    faqItems: Array.from(document.querySelectorAll('.faq-item')),
     lang: $('lang'), langBtn: $('langBtn'), langCode: $('langCode'),
     langItems: Array.from(document.querySelectorAll('#langMenu [data-lang]'))
   };
@@ -355,7 +358,14 @@ function bootGame() {
       attackIncoming: 'ATTACK INCOMING!', attackNow: 'OPPONENT ATTACKS! HOLD ON!', lastStand: '!! LAST STAND !!',
       desperation: 'DESPERATION ATTACK!', tired: 'OPPONENT TIRED — PULL NOW!',
       popYes: 'YES!', popOof: 'OOF!', popHyaa: 'HYAA!', popLastStand: 'LAST STAND!', popRaaagh: 'RAAAGH!', popHuff: 'huff... huff...',
-      muteTitle: 'Toggle sound (M)', language: 'Language'
+      muteTitle: 'Toggle sound (M)', language: 'Language',
+      faqBtn: 'FAQ', faqTitle: 'FREQUENTLY ASKED QUESTIONS',
+      q1: 'What is the game?',
+      a1: 'Tayak Tartysh means "stick pulling" in Kyrgyz. It is an old strength contest of the nomadic peoples of Central Asia. Two wrestlers sit facing each other, press their feet against a wooden board and grab the same stick. Whoever pulls the rival over the board, or takes the stick away, wins. Herders used it to test strength and endurance, and it was a favourite at festivals and celebrations, when whole villages gathered by the yurts to cheer. A close relative, mas-wrestling from Yakutia, is still played around the world today.',
+      q2: 'How do I switch languages?',
+      a2: 'Click the globe button in the top-right corner of the main menu (it also appears here on the help screens). Choose English, Кыргызча, Русский or 中文 and the whole game switches at once. The game remembers your choice for next time.',
+      q3: 'Who created the game?',
+      a3: 'Tayak Tartysh was created by Nursultan in collaboration with Claude AI for his Perspectives on the Humanities course.'
     },
     ky: {
       code: 'KG', title: 'ТАЯК ТАРТЫШ', subtitle: 'Көчмөндөрдүн күч сынашуусу', play: 'ОЙНОО',
@@ -378,7 +388,14 @@ function bootGame() {
       attackIncoming: 'ЧАБУУЛ КЕЛЕ ЖАТАТ!', attackNow: 'АТААНДАШ ЧАБУУЛДАДЫ! ЧЫДА!', lastStand: '!! АКЫРКЫ АРАКЕТ !!',
       desperation: 'ЖАН ДАЛБАС ЧАБУУЛ!', tired: 'АТААНДАШ ЧАРЧАДЫ — АЗЫР ТАРТ!',
       popYes: 'УРА!', popOof: 'ОЙ!', popHyaa: 'ХАА!', popLastStand: 'АКЫРКЫ АРАКЕТ!', popRaaagh: 'АРРРР!', popHuff: 'уф... уф...',
-      muteTitle: 'Үндү күйгүзүү/өчүрүү (M)', language: 'Тил'
+      muteTitle: 'Үндү күйгүзүү/өчүрүү (M)', language: 'Тил',
+      faqBtn: 'СУРОО-ЖООП', faqTitle: 'КӨП БЕРИЛГЕН СУРООЛОР',
+      q1: 'Бул кандай оюн?',
+      a1: 'Таяк тартыш — Борбордук Азиядагы көчмөн элдердин байыркы күч сынашуу оюну. Эки балбан бетме-бет отуруп, буттарын жыгач тактайга тирейт да, бир таякты кармашат. Атаандашын тактайдан ашыра тарткан же таякты колунан жулуп алган балбан жеңет. Малчылар бул оюн аркылуу күчүн жана чыдамкайлыгын сынашкан, ал эми той-майрамдарда бүт айыл боз үйлөрдүн жанына чогулуп, балбандарга дем берген. Анын жакын тууганы — Саха (Якутия) элинин мас-рестлинги — бүгүн да дүйнө жүзүндө ойнолот.',
+      q2: 'Тилди кантип алмаштырам?',
+      a2: 'Башкы менюнун жогорку оң бурчундагы глобус баскычын бас (ал ушул жардам барактарында да бар). English, Кыргызча, Русский же 中文 тандасаң, бүт оюн ошол замат которулат. Оюн тандооңду кийинки жолу да эстеп калат.',
+      q3: 'Оюнду ким жараткан?',
+      a3: 'Таяк Тартыш оюнун Нурсултан «Perspectives on the Humanities» курсу үчүн Claude AI менен биргелешип жараткан.'
     },
     ru: {
       code: 'RU', title: 'ТАЯК ТАРТЫШ', subtitle: 'Испытание силы кочевников', play: 'ИГРАТЬ',
@@ -401,7 +418,14 @@ function bootGame() {
       attackIncoming: 'ГОТОВИТСЯ АТАКА!', attackNow: 'АТАКА СОПЕРНИКА! ДЕРЖИСЬ!', lastStand: '!! ПОСЛЕДНИЙ РЫВОК !!',
       desperation: 'ОТЧАЯННАЯ АТАКА!', tired: 'СОПЕРНИК УСТАЛ — ТЯНИ!',
       popYes: 'ДА!', popOof: 'ОХ!', popHyaa: 'ХЭЙ!', popLastStand: 'ПОСЛЕДНИЙ РЫВОК!', popRaaagh: 'РРРАА!', popHuff: 'уф... уф...',
-      muteTitle: 'Вкл/выкл звук (M)', language: 'Язык'
+      muteTitle: 'Вкл/выкл звук (M)', language: 'Язык',
+      faqBtn: 'ВОПРОСЫ', faqTitle: 'ЧАСТЫЕ ВОПРОСЫ',
+      q1: 'Что это за игра?',
+      a1: '«Таяк тартыш» по-кыргызски значит «перетягивание палки». Это древнее силовое состязание кочевых народов Центральной Азии. Два борца садятся лицом друг к другу, упираются ногами в деревянную доску и берутся за одну палку. Побеждает тот, кто перетянет соперника через доску или вырвет у него палку. Пастухи так проверяли силу и выносливость, а на праздниках и тоях целые аилы собирались у юрт, чтобы поболеть за борцов. Близкий родственник этой игры, якутский мас-рестлинг, и сегодня популярен во всём мире.',
+      q2: 'Как сменить язык?',
+      a2: 'Нажми кнопку с глобусом в правом верхнем углу главного меню (она есть и здесь, на экранах справки). Выбери English, Кыргызча, Русский или 中文, и вся игра сразу переключится. Игра запомнит твой выбор.',
+      q3: 'Кто создал игру?',
+      a3: 'Игру «Таяк Тартыш» создал Нурсултан в сотрудничестве с Claude AI для своего курса «Perspectives on the Humanities».'
     },
     zh: {
       code: '中文', title: '拔棍大赛', subtitle: '游牧民族的力量较量', play: '开始游戏',
@@ -424,7 +448,14 @@ function bootGame() {
       attackIncoming: '对手要进攻了！', attackNow: '对手进攻！顶住！', lastStand: '!! 背水一战 !!',
       desperation: '拼死反扑！', tired: '对手累了，快拉！',
       popYes: '好！', popOof: '哎哟！', popHyaa: '嘿呀！', popLastStand: '背水一战！', popRaaagh: '啊啊啊！', popHuff: '呼……呼……',
-      muteTitle: '声音开关 (M)', language: '语言'
+      muteTitle: '声音开关 (M)', language: '语言',
+      faqBtn: '常见问题', faqTitle: '常见问题',
+      q1: '这是什么游戏？',
+      a1: '“Tayak Tartysh”在吉尔吉斯语中意为“拔棍”。这是中亚游牧民族一项古老的力量比赛：两名选手面对面坐下，双脚抵住一块木板，一起握住同一根木棍。谁把对手拉过木板，或把木棍夺到手，谁就获胜。牧民们用它来比试力气和耐力；每逢节日和喜庆聚会，整个村子都会聚在毡房旁为选手加油。与它相近的雅库特“木棍角力”（mas-wrestling）如今仍在世界各地流行。',
+      q2: '如何切换语言？',
+      a2: '点击主菜单右上角的地球按钮（在这几个帮助页面上也能看到）。选择 English、Кыргызча、Русский 或 中文，整个游戏会立即切换，并且会记住你的选择。',
+      q3: '谁制作了这款游戏？',
+      a3: '这款游戏由努尔苏丹（Nursultan）与 Claude AI 合作制作，是他为“Perspectives on the Humanities”课程完成的作品。'
     }
   };
   let lang = 'en';
@@ -451,6 +482,7 @@ function bootGame() {
   }
   function refit() {
     fitText(ui.title, 1120);
+    fitText(ui.faqTitle, 770);
     fitZones();
   }
   function applyLang(code) {
@@ -2384,9 +2416,10 @@ function bootGame() {
     game.stateTime = 0;
     showScreen(ui.menu, s === S.MENU);
     showScreen(ui.howto, s === S.HOW_TO_PLAY);
+    showScreen(ui.faq, s === S.FAQ);
     showScreen(ui.matchEnd, s === S.MATCH_END);
     if (s !== S.ROUND_END) showScreen(ui.roundEnd, false);
-    ui.lang.classList.toggle('show', s === S.MENU || s === S.HOW_TO_PLAY);
+    ui.lang.classList.toggle('show', s === S.MENU || s === S.HOW_TO_PLAY || s === S.FAQ);
     setLangMenu(false);
     ui.hud.classList.toggle('show', s === S.COUNTDOWN || s === S.PLAYING || s === S.ROUND_END);
     ui.spaceHint.classList.toggle('off', s !== S.PLAYING && s !== S.COUNTDOWN);
@@ -2798,7 +2831,8 @@ function bootGame() {
   function onEnter() {
     switch (game.state) {
       case S.MENU: Sound.click(); startMatch(); break;
-      case S.HOW_TO_PLAY: Sound.click(); setState(S.MENU); break;
+      case S.HOW_TO_PLAY:
+      case S.FAQ: Sound.click(); setState(S.MENU); break;
       case S.ROUND_END: nextRound(); break;
       case S.MATCH_END: Sound.click(); startMatch(); break;
     }
@@ -2818,7 +2852,7 @@ function bootGame() {
     else if (e.code === 'KeyM') { Sound.init(); toggleMute(); }
     else if (e.code === 'Escape') {
       if (ui.lang.classList.contains('open')) { setLangMenu(false); return; }
-      if (game.state === S.HOW_TO_PLAY || game.state === S.MATCH_END) goMenu();
+      if (game.state === S.HOW_TO_PLAY || game.state === S.FAQ || game.state === S.MATCH_END) goMenu();
     }
   }, { capture: true });
 
@@ -2831,6 +2865,21 @@ function bootGame() {
   ui.playBtn.addEventListener('click', () => { Sound.init(); Sound.click(); startMatch(); });
   ui.howBtn.addEventListener('click', () => { Sound.init(); Sound.click(); setState(S.HOW_TO_PLAY); });
   ui.backBtn.addEventListener('click', () => { Sound.click(); setState(S.MENU); });
+  // FAQ: an accordion, one answer open at a time
+  function openFaq(item) {
+    ui.faqItems.forEach((it) => {
+      const open = it === item && !it.classList.contains('open');
+      it.classList.toggle('open', open);
+      it.querySelector('.faq-q').setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  }
+  ui.faqBtn.addEventListener('click', () => { Sound.init(); Sound.click(); openFaq(null); setState(S.FAQ); });
+  ui.faqBackBtn.addEventListener('click', () => { Sound.click(); setState(S.MENU); });
+  ui.faqItems.forEach((it) => it.querySelector('.faq-q').addEventListener('click', (e) => {
+    Sound.click();
+    openFaq(it);
+    e.currentTarget.blur();
+  }));
   ui.nextBtn.addEventListener('click', () => { Sound.click(); nextRound(); });
   ui.rematchBtn.addEventListener('click', () => { Sound.click(); startMatch(); });
   ui.menuBtn.addEventListener('click', () => { Sound.click(); goMenu(); });
