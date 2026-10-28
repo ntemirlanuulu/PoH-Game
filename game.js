@@ -4,47 +4,61 @@
 
    File layout
      1. Tuning (BALANCE) and state enums
-     2. Force simulation + AI state machine (pure, no DOM; runs in Node too)
+     2. Force simulation + AI state machine + stamina (pure, no DOM; runs in Node too)
      3. bootGame(): rendering, animation, audio, input, UI flow
+   UI text lives in strings.js (STRINGS), loaded before this file.
    ========================================================================== */
 'use strict';
 
 /* ---------------------------------------------------------------------------
    1. TUNING
-   Player force uses a flat decay PLUS a proportional drag. With a flat decay
-   alone, any rate above ~2 taps/s eventually saturates at playerMaxForce, so
-   4 taps/s and 8 taps/s would end up equally strong. The drag term makes the
-   steady-state force depend on tap rate:  F ≈ (rate·impulse − decay) / drag
-   → 2 t/s ≈ 6, 3 t/s ≈ 10.5, 4 t/s ≈ 14.8, 5 t/s ≈ 19.2, 6+ t/s ≈ 24 (cap)
-   V2: impulse raised from 1.5 so ~4 taps/s now does what ~7 taps/s used to.
+   Each human puller's force uses a flat decay PLUS a proportional drag, so the
+   steady-state force depends on tap rate:  F ≈ (rate·impulse − decay) / drag
+   → 3 t/s ≈ 10.5, 4 t/s ≈ 14.8, 4.5 t/s ≈ 17, 5 t/s ≈ 19.2, 6+ t/s ≈ 24 (cap)
+
+   Stamina (humans only): tapping below stamina.freeRate costs nothing. Above
+   it, each tap costs drainPerExcess × (rate − freeRate). At 0 the puller is
+   "tired": impulse and force cap drop to tiredMultiplier until stamina climbs
+   back past recoverAt. Refill starts regenDelay seconds after the last costly tap.
    --------------------------------------------------------------------------- */
 const BALANCE = {
-  playerImpulse: 2.6,
-  playerForceDecay: 1.5,      // flat decay, force per second
-  playerForceDrag: 0.6,       // proportional decay, 1/second
-  playerMaxForce: 24,
+  pullImpulse: 2.6,
+  forceDecay: 1.5,            // flat decay, force per second
+  forceDrag: 0.6,             // proportional decay, 1/second
+  maxForce: 20,
   minTapInterval: 0.03,       // ignore key-switch chatter faster than this
-  positionScale: 2.2,
-  maxPositionSpeed: 24,
-  positionDamping: 5,
+  positionScale: 1.1,
+  maxPositionSpeed: 14,
+  positionDamping: 4,
   roundLimit: 100,
   desperationZone: 72,        // AI may attempt a last stand at pullPosition <= -72
-  leverage: 5,                // the wrestler who is ahead gains leverage (breaks stalemates)
-  aiForm: 0.12,               // per-round AI strength variation (±)
-  aiDrift: 0.15,              // slow strength drift within a round (±)
+  leverage: 2,                // the wrestler who is ahead gains leverage (breaks stalemates)
+  aiForm: 0.08,               // per-round AI strength variation (±)
+  aiDrift: 0.1,               // slow strength drift within a round (±)
+
+  stamina: {
+    max: 100,
+    freeRate: 4,              // taps/s that never cost stamina
+    drainPerExcess: 0.32,     // stamina per tap, per tap/s above freeRate
+    rateSmoothing: 0.5,      // how fast the tap-rate estimate follows the latest gap
+    regenDelay: 0.4,          // seconds after the last costly tap before refilling
+    regenRate: 22,            // stamina per second → empty to full ≈ 4.5 s
+    tiredMultiplier: 0.6,     // impulse and force cap while tired
+    recoverAt: 30             // tired clears above this (hysteresis, no flicker)
+  },
 
   ai: {
     easy: {
-      title: 'Village Rookie',
-      baseForce: 5.5,
-      attackBonus: 2.5,
-      attackInterval: [4, 7],
+      baseForce: 10,
+      attackBonus: 4,
+      attackInterval: [5, 8],
       attackDuration: [0.6, 1.2],
-      windup: 0.75,
-      recoveryDuration: 1.5,
+      windup: 0.8,
+      recoveryDuration: 1.8,
       recoveryFactor: 0.55,
       wobble: 0.08,
       opportunism: 0.15,
+      pounce: 0.2,            // chance per second to attack a tired player
       desperationChance: 0.5,
       desperationLimit: 1,
       desperationWindup: 1.0,
@@ -52,16 +66,16 @@ const BALANCE = {
       desperationBonus: 1.8
     },
     medium: {
-      title: 'Skilled Wrestler',
-      baseForce: 7.6,
-      attackBonus: 4,
-      attackInterval: [3, 6],
+      baseForce: 14.5,
+      attackBonus: 6,
+      attackInterval: [4, 7],
       attackDuration: [0.8, 1.4],
-      windup: 0.6,
-      recoveryDuration: 1.5,
+      windup: 0.65,
+      recoveryDuration: 1.7,
       recoveryFactor: 0.55,
       wobble: 0.08,
       opportunism: 0.3,
+      pounce: 0.5,
       desperationChance: 0.7,
       desperationLimit: 1,
       desperationWindup: 0.9,
@@ -69,16 +83,16 @@ const BALANCE = {
       desperationBonus: 1.9
     },
     hard: {
-      title: 'Nomadic Champion',
-      baseForce: 10,
-      attackBonus: 5,
-      attackInterval: [2.5, 5],
+      baseForce: 15.75,
+      attackBonus: 7,
+      attackInterval: [3.5, 6],
       attackDuration: [0.8, 1.5],
-      windup: 0.5,
-      recoveryDuration: 1.2,
-      recoveryFactor: 0.6,
+      windup: 0.55,
+      recoveryDuration: 2.2,
+      recoveryFactor: 0.45,
       wobble: 0.07,
       opportunism: 0.45,
+      pounce: 0.8,
       desperationChance: 0.85,
       desperationLimit: 2,
       desperationWindup: 0.8,
@@ -109,48 +123,94 @@ const AIState = Object.freeze({
    2. SIMULATION
    One authoritative round object. Everything on screen (stick, bodies, HUD)
    is derived from round.pullPosition and the two forces.
+   Sides: 'left' is always a human (blue). 'right' is the AI in 1-player mode
+   and a second human in 2-player mode (r.ai is then null).
    --------------------------------------------------------------------------- */
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 function lerp(a, b, t) { return a + (b - a) * t; }
 function damp(cur, target, rate, dt) { return cur + (target - cur) * (1 - Math.exp(-rate * dt)); }
 function randRange(rng, range) { return range[0] + (range[1] - range[0]) * rng(); }
 
-function createRound(difficulty, rng = Math.random) {
-  const cfg = BALANCE.ai[difficulty];
+function createPuller() {
   return {
+    force: 0,
+    stamina: BALANCE.stamina.max,
+    tired: false,
+    lastTap: -1,
+    interval: 0.5,            // smoothed gap between taps (seconds)
+    rate: 0,                  // taps per second, from the smoothed gap
+    lastDrain: -10            // sim time of the last tap that cost stamina
+  };
+}
+
+function createAI(cfg, rng) {
+  return {
+    state: AIState.NORMAL,
+    phase: 'idle',
+    phaseTime: 0,
+    timer: 1.5 + randRange(rng, cfg.attackInterval) * 0.6,
+    scanTimer: 1,
+    strikeDuration: 0,
+    recoveryDuration: cfg.recoveryDuration,
+    recoveryFactor: cfg.recoveryFactor,
+    desperationUsed: 0,
+    dangerRolled: false,
+    wobbleSeed: rng() * 100,
+    form: 1 + (rng() * 2 - 1) * BALANCE.aiForm,
+    driftFreq: 0.55 + rng() * 0.5,
+    target: cfg.baseForce
+  };
+}
+
+/**
+ * mode: '1p' (right side is the AI) or '2p' (right side is a second human).
+ * difficulty is ignored in 2p.
+ */
+function createRound(difficulty, { mode = '1p', rng = Math.random } = {}) {
+  const twoPlayer = mode === '2p';
+  const cfg = twoPlayer ? null : BALANCE.ai[difficulty];
+  return {
+    mode,
     difficulty,
     cfg,
     rng,
     time: 0,
     pullPosition: 0,
     pullVelocity: 0,
-    playerForce: 0,
-    aiForce: cfg.baseForce * 0.85,
-    ai: {
-      state: AIState.NORMAL,
-      phase: 'idle',
-      phaseTime: 0,
-      timer: 1.5 + randRange(rng, cfg.attackInterval) * 0.6,
-      scanTimer: 1,
-      strikeDuration: 0,
-      recoveryDuration: cfg.recoveryDuration,
-      recoveryFactor: cfg.recoveryFactor,
-      desperationUsed: 0,
-      dangerRolled: false,
-      wobbleSeed: rng() * 100,
-      form: 1 + (rng() * 2 - 1) * BALANCE.aiForm,
-      driftFreq: 0.55 + rng() * 0.5,
-      target: cfg.baseForce
-    },
+    left: createPuller(),
+    right: twoPlayer ? createPuller() : null,
+    aiForce: twoPlayer ? 0 : cfg.baseForce * 0.85,
+    ai: twoPlayer ? null : createAI(cfg, rng),
     winner: null,
     events: []
   };
 }
 
-/** A valid, fresh SPACE press. Returns false if the round no longer accepts input. */
-function registerPull(r) {
+/** Current pulling force of a side (human or AI). */
+function sideForce(r, side) {
+  if (side === 'left') return r.left.force;
+  return r.right ? r.right.force : r.aiForce;
+}
+
+/** A valid, fresh tap/press for a human side. Returns false if it was not accepted. */
+function registerPull(r, side = 'left') {
   if (r.winner) return false;
-  r.playerForce = Math.min(r.playerForce + BALANCE.playerImpulse, BALANCE.playerMaxForce);
+  const p = side === 'left' ? r.left : r.right;
+  if (!p) return false; // the AI side cannot be pulled for
+  const S = BALANCE.stamina;
+  if (p.lastTap >= 0) p.interval = lerp(p.interval, clamp(r.time - p.lastTap, 0.03, 1), S.rateSmoothing);
+  p.lastTap = r.time;
+  p.rate = 1 / p.interval;
+  const excess = p.rate - S.freeRate;
+  if (excess > 0) {
+    p.stamina = Math.max(0, p.stamina - S.drainPerExcess * excess);
+    p.lastDrain = r.time;
+  }
+  if (p.stamina <= 0) p.tired = true;
+  const k = p.tired ? S.tiredMultiplier : 1;
+  // A tired puller already above the lowered cap keeps that force (it decays
+  // naturally) but cannot add to it.
+  p.force = Math.min(p.force + BALANCE.pullImpulse * k, Math.max(p.force, BALANCE.maxForce * k));
   return true;
 }
 
@@ -189,7 +249,9 @@ function updateAI(r, dt) {
       if (ai.scanTimer <= 0) {
         ai.scanTimer = 1;
         // Opportunism: if the player eases off, strike early.
-        if (r.time > 2.5 && r.playerForce < base * 0.45 && ai.timer > 0.6 && rng() < cfg.opportunism) ai.timer = 0;
+        if (r.time > 2.5 && r.left.force < base * 0.45 && ai.timer > 0.6 && rng() < cfg.opportunism) ai.timer = 0;
+        // Pounce: a tired player is an invitation.
+        if (r.left.tired && ai.timer > 0.6 && rng() < cfg.pounce) ai.timer = 0;
       }
       if (ai.timer <= 0) {
         ai.strikeDuration = randRange(rng, cfg.attackDuration);
@@ -252,6 +314,19 @@ function updateAI(r, dt) {
   r.aiForce = damp(r.aiForce, target, rate, dt);
 }
 
+function stepPuller(r, p, side, dt) {
+  const B = BALANCE, S = B.stamina;
+  p.force = Math.max(0, p.force - (B.forceDecay + p.force * B.forceDrag) * dt);
+  if (r.time - p.lastDrain >= S.regenDelay) p.stamina = Math.min(S.max, p.stamina + S.regenRate * dt);
+  if (p.tired && p.stamina >= S.recoverAt) {
+    p.tired = false;
+    r.events.push({ type: 'staminaBack', side });
+  } else if (p.tired && !p.tiredAnnounced) {
+    r.events.push({ type: 'exhausted', side });
+  }
+  p.tiredAnnounced = p.tired;
+}
+
 /** Advance one round by dt seconds. Events raised this step are left in r.events. */
 function stepRound(r, dt) {
   r.events.length = 0;
@@ -259,29 +334,29 @@ function stepRound(r, dt) {
   const B = BALANCE;
   r.time += dt;
 
-  updateAI(r, dt);
+  if (r.ai) updateAI(r, dt);
+  stepPuller(r, r.left, 'left', dt);
+  if (r.right) stepPuller(r, r.right, 'right', dt);
 
-  r.playerForce = Math.max(0, r.playerForce - (B.playerForceDecay + r.playerForce * B.playerForceDrag) * dt);
-
-  // Positive net force → toward the AI (+100); negative → toward the player (−100).
+  // Positive net force → toward the right side (+100); negative → toward the left (−100).
   // Leverage: once a wrestler is dragged forward they lose purchase, so the
   // leader gets a small bonus. Keeps evenly matched rounds from stalling.
-  const netForce = r.aiForce - r.playerForce + B.leverage * (r.pullPosition / B.roundLimit);
+  const netForce = sideForce(r, 'right') - sideForce(r, 'left') + B.leverage * (r.pullPosition / B.roundLimit);
   const targetVelocity = clamp(netForce * B.positionScale, -B.maxPositionSpeed, B.maxPositionSpeed);
   r.pullVelocity += (targetVelocity - r.pullVelocity) * (1 - Math.exp(-B.positionDamping * dt));
   r.pullPosition = clamp(r.pullPosition + r.pullVelocity * dt, -B.roundLimit, B.roundLimit);
 
   if (r.pullPosition <= -B.roundLimit) {
-    r.winner = 'player';
-    r.events.push({ type: 'win', winner: 'player' });
+    r.winner = 'left';
+    r.events.push({ type: 'win', winner: 'left' });
   } else if (r.pullPosition >= B.roundLimit) {
-    r.winner = 'ai';
-    r.events.push({ type: 'win', winner: 'ai' });
+    r.winner = 'right';
+    r.events.push({ type: 'win', winner: 'right' });
   }
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { BALANCE, GameState, AIState, createRound, registerPull, stepRound };
+  module.exports = { BALANCE, GameState, AIState, createRound, registerPull, stepRound, sideForce };
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
@@ -319,145 +394,34 @@ function bootGame() {
   const stage = $('stage');
   const canvas = $('game');
   const ctx = canvas.getContext('2d');
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+  const meterRefs = (el) => ({
+    el, key: el.querySelector('.key'), hint: el.querySelector('.hint-text'),
+    power: el.querySelector('.power-fill'), tick: el.querySelector('.ai-tick'), rate: el.querySelector('.tap-rate b'),
+    stamina: el.querySelector('.stamina-fill'), tired: el.querySelector('.tired-tag')
+  });
   const ui = {
     hud: $('hud'), menu: $('menu'), howto: $('howto'), roundEnd: $('roundEnd'), matchEnd: $('matchEnd'),
     countdown: $('countdown'), roundLabel: $('roundLabel'), scoreLabel: $('scoreLabel'),
     playerPips: $('playerPips'), aiPips: $('aiPips'), tug: $('tug'), tugFill: $('tugFill'), tugMarker: $('tugMarker'),
-    alert: $('alert'), powerFill: $('powerFill'), aiTick: $('aiTick'), tapRate: $('tapRate'),
-    spaceKey: $('spaceKey'), spaceHint: $('spaceHint'), aiDiff: $('aiDiff'),
+    alert: $('alert'), leftName: $('leftName'), rightName: $('rightName'), rightSub: $('rightSub'),
+    meters: { left: meterRefs($('meterL')), right: meterRefs($('meterR')) },
+    touchZones: $('touchZones'), tzLeft: $('tzLeft'), tzRight: $('tzRight'),
     roundTitle: $('roundTitle'), roundSub: $('roundSub'), nextBtn: $('nextBtn'), roundHint: $('roundHint'),
+    factCard: $('factCard'), factText: $('factText'),
     matchTitle: $('matchTitle'), matchSub: $('matchSub'), rematchBtn: $('rematchBtn'), menuBtn: $('menuBtn'),
     trophy: $('trophy'), playBtn: $('playBtn'), howBtn: $('howBtn'), backBtn: $('backBtn'), muteBtn: $('muteBtn'),
-    diffBtns: Array.from(document.querySelectorAll('.diff-btn')), title: document.querySelector('#menu .title'),
+    modeBtns: $$('.mode-btn'), diffBtns: $$('.diff-btn'), oppStory: $('oppStory'),
+    tabs: $$('#howto .tab'), tabPanels: $$('#howto .tab-panel'),
+    title: document.querySelector('#menu .title'), howScroll: document.querySelector('#howto .card-scroll'),
     faq: $('faq'), faqBtn: $('faqBtn'), faqBackBtn: $('faqBackBtn'), faqTitle: $('faqTitle'),
-    faqItems: Array.from(document.querySelectorAll('.faq-item')),
+    faqItems: $$('.faq-item'), faqList: document.querySelector('#faq .faq-list'),
     lang: $('lang'), langBtn: $('langBtn'), langCode: $('langCode'),
-    langItems: Array.from(document.querySelectorAll('#langMenu [data-lang]'))
+    langItems: $$('#langMenu [data-lang]')
   };
 
   /* ---------- Languages ---------- */
-  const STRINGS = {
-    en: {
-      code: 'EN', title: 'TAYAK TARTYSH', subtitle: 'The Nomadic Pulling Challenge', play: 'PLAY GAME',
-      difficulty: 'DIFFICULTY', easy: 'EASY', medium: 'MEDIUM', hard: 'HARD',
-      easyTitle: 'Village Rookie', mediumTitle: 'Skilled Wrestler', hardTitle: 'Nomadic Champion',
-      howBtn: 'HOW TO PLAY', menuFoot: '<kbd>ENTER</kbd> start &nbsp;·&nbsp; <kbd>M</kbd> mute',
-      howTitle: 'HOW TO PLAY',
-      howLead: 'Press <kbd>SPACE</kbd> repeatedly to pull the wooden stick toward you. Your opponent will fight back. Pull harder and faster to win!',
-      tip1Head: "TAP, DON'T HOLD", tip1: 'Every fresh press adds pulling power. Holding the key does nothing, and your power fades when you slow down.',
-      tip2Head: 'SURVIVE ATTACKS', tip2: 'A red <b>!</b> warns of a big counter-pull. Tap even faster to hold your ground.',
-      tip3Head: 'PUNISH FATIGUE', tip3: "After attacking, your rival gets tired. That's your moment: go all out!",
-      howFoot: 'Drag the stick all the way to your side to win a round. <b>Best of three</b>: win 2 rounds to become champion.',
-      back: 'BACK', you: 'YOU', blueCorner: 'BLUE CORNER', opponent: 'OPPONENT', win: 'WIN',
-      round: 'ROUND {n}', finalRound: 'FINAL ROUND', go: 'PULL!',
-      spaceKey: 'SPACE', toPull: 'TO PULL', pullPower: 'PULL POWER', tapsPerSec: 'taps/s', opponentForce: 'Opponent force',
-      roundWon: 'ROUND WON!', roundLost: 'ROUND LOST!', roundSub: 'YOU {p} : {a} OPPONENT',
-      nextRound: 'NEXT ROUND', pressEnter: 'press <kbd>ENTER</kbd>',
-      champ: 'YOU ARE THE CHAMPION!', defeat: 'DEFEAT — TRY AGAIN!', finalScore: 'FINAL SCORE {p} : {a}  ·  {diff}',
-      rematch: 'REMATCH', mainMenu: 'MAIN MENU', matchHint: '<kbd>ENTER</kbd> rematch &nbsp;·&nbsp; <kbd>ESC</kbd> menu',
-      attackIncoming: 'ATTACK INCOMING!', attackNow: 'OPPONENT ATTACKS! HOLD ON!', lastStand: '!! LAST STAND !!',
-      desperation: 'DESPERATION ATTACK!', tired: 'OPPONENT TIRED — PULL NOW!',
-      popYes: 'YES!', popOof: 'OOF!', popHyaa: 'HYAA!', popLastStand: 'LAST STAND!', popRaaagh: 'RAAAGH!', popHuff: 'huff... huff...',
-      muteTitle: 'Toggle sound (M)', language: 'Language',
-      faqBtn: 'FAQ', faqTitle: 'FREQUENTLY ASKED QUESTIONS',
-      q1: 'What is the game?',
-      a1: 'Tayak Tartysh means "stick pulling" in Kyrgyz. It is an old strength contest of the nomadic peoples of Central Asia. Two wrestlers sit facing each other, press their feet against a wooden board and grab the same stick. Whoever pulls the rival over the board, or takes the stick away, wins. Herders used it to test strength and endurance, and it was a favourite at festivals and celebrations, when whole villages gathered by the yurts to cheer. A close relative, mas-wrestling from Yakutia, is still played around the world today.',
-      q2: 'How do I switch languages?',
-      a2: 'Click the globe button in the top-right corner of the main menu (it also appears here on the help screens). Choose English, Кыргызча, Русский or 中文 and the whole game switches at once. The game remembers your choice for next time.',
-      q3: 'Who created the game?',
-      a3: 'Tayak Tartysh was created by Nursultan in collaboration with Claude AI for his Perspectives on the Humanities course.'
-    },
-    ky: {
-      code: 'KG', title: 'ТАЯК ТАРТЫШ', subtitle: 'Көчмөндөрдүн күч сынашуусу', play: 'ОЙНОО',
-      difficulty: 'ДЕҢГЭЭЛ', easy: 'ОҢОЙ', medium: 'ОРТО', hard: 'ООР',
-      easyTitle: 'Айылдын жаш балбаны', mediumTitle: 'Тажрыйбалуу балбан', hardTitle: 'Көчмөн чемпиону',
-      howBtn: 'ОЮН ЭРЕЖЕСИ', menuFoot: '<kbd>ENTER</kbd> баштоо &nbsp;·&nbsp; <kbd>M</kbd> үн',
-      howTitle: 'ОЮН ЭРЕЖЕСИ',
-      howLead: '<kbd>БОШТУК</kbd> баскычын улам-улам басып, жыгач таякты өзүңө тарт. Атаандашың каршылык көрсөтөт. Жеңиш үчүн катуураак жана тезирээк тарт!',
-      tip1Head: 'БАС, КАРМАБА', tip1: 'Ар бир жаңы басуу күч кошот. Баскычты басып туруу эч нерсе бербейт, ал эми жайласаң күчүң азаят.',
-      tip2Head: 'ЧАБУУЛГА ЧЫДА', tip2: 'Кызыл <b>!</b> белгиси катуу каршы тартууну эскертет. Ордуңда туруу үчүн дагы тезирээк бас.',
-      tip3Head: 'ЧАРЧАГАНЫН ПАЙДАЛАН', tip3: 'Чабуулдан кийин атаандашың чарчайт. Бул сенин учуруң: бар күчүңдү жумша!',
-      howFoot: 'Раундду утуш үчүн таякты толугу менен өз тарабыңа тарт. <b>Үч раунддан экөөсү</b>: чемпион болуш үчүн 2 раундду ут.',
-      back: 'АРТКА', you: 'СЕН', blueCorner: 'КӨК БУРЧ', opponent: 'АТААНДАШ', win: 'ЖЕҢИШ',
-      round: '{n}-РАУНД', finalRound: 'АКЫРКЫ РАУНД', go: 'ТАРТ!',
-      spaceKey: 'БОШТУК', toPull: 'ТАРТУУ ҮЧҮН', pullPower: 'ТАРТУУ КҮЧҮ', tapsPerSec: 'басуу/сек', opponentForce: 'Атаандаштын күчү',
-      roundWon: 'РАУНДДУ УТТУҢ!', roundLost: 'РАУНДДУ УТТУРДУҢ!', roundSub: 'СЕН {p} : {a} АТААНДАШ',
-      nextRound: 'КИЙИНКИ РАУНД', pressEnter: '<kbd>ENTER</kbd> бас',
-      champ: 'СЕН ЧЕМПИОНСУҢ!', defeat: 'ЖЕҢИЛДИҢ — КАЙРА АРАКЕТ КЫЛ!', finalScore: 'ЖЫЙЫНТЫК {p} : {a}  ·  {diff}',
-      rematch: 'КАЙРА ОЙНОО', mainMenu: 'БАШКЫ МЕНЮ', matchHint: '<kbd>ENTER</kbd> кайра ойноо &nbsp;·&nbsp; <kbd>ESC</kbd> меню',
-      attackIncoming: 'ЧАБУУЛ КЕЛЕ ЖАТАТ!', attackNow: 'АТААНДАШ ЧАБУУЛДАДЫ! ЧЫДА!', lastStand: '!! АКЫРКЫ АРАКЕТ !!',
-      desperation: 'ЖАН ДАЛБАС ЧАБУУЛ!', tired: 'АТААНДАШ ЧАРЧАДЫ — АЗЫР ТАРТ!',
-      popYes: 'УРА!', popOof: 'ОЙ!', popHyaa: 'ХАА!', popLastStand: 'АКЫРКЫ АРАКЕТ!', popRaaagh: 'АРРРР!', popHuff: 'уф... уф...',
-      muteTitle: 'Үндү күйгүзүү/өчүрүү (M)', language: 'Тил',
-      faqBtn: 'СУРОО-ЖООП', faqTitle: 'КӨП БЕРИЛГЕН СУРООЛОР',
-      q1: 'Бул кандай оюн?',
-      a1: 'Таяк тартыш — Борбордук Азиядагы көчмөн элдердин байыркы күч сынашуу оюну. Эки балбан бетме-бет отуруп, буттарын жыгач тактайга тирейт да, бир таякты кармашат. Атаандашын тактайдан ашыра тарткан же таякты колунан жулуп алган балбан жеңет. Малчылар бул оюн аркылуу күчүн жана чыдамкайлыгын сынашкан, ал эми той-майрамдарда бүт айыл боз үйлөрдүн жанына чогулуп, балбандарга дем берген. Анын жакын тууганы — Саха (Якутия) элинин мас-рестлинги — бүгүн да дүйнө жүзүндө ойнолот.',
-      q2: 'Тилди кантип алмаштырам?',
-      a2: 'Башкы менюнун жогорку оң бурчундагы глобус баскычын бас (ал ушул жардам барактарында да бар). English, Кыргызча, Русский же 中文 тандасаң, бүт оюн ошол замат которулат. Оюн тандооңду кийинки жолу да эстеп калат.',
-      q3: 'Оюнду ким жараткан?',
-      a3: 'Таяк Тартыш оюнун Нурсултан «Perspectives on the Humanities» курсу үчүн Claude AI менен биргелешип жараткан.'
-    },
-    ru: {
-      code: 'RU', title: 'ТАЯК ТАРТЫШ', subtitle: 'Испытание силы кочевников', play: 'ИГРАТЬ',
-      difficulty: 'СЛОЖНОСТЬ', easy: 'ЛЁГКИЙ', medium: 'СРЕДНИЙ', hard: 'СЛОЖНЫЙ',
-      easyTitle: 'Сельский новичок', mediumTitle: 'Опытный борец', hardTitle: 'Чемпион кочевников',
-      howBtn: 'КАК ИГРАТЬ', menuFoot: '<kbd>ENTER</kbd> старт &nbsp;·&nbsp; <kbd>M</kbd> звук',
-      howTitle: 'КАК ИГРАТЬ',
-      howLead: 'Быстро нажимай <kbd>ПРОБЕЛ</kbd>, чтобы тянуть деревянную палку к себе. Соперник будет сопротивляться. Тяни сильнее и быстрее, чтобы победить!',
-      tip1Head: 'ЖМИ, НЕ ДЕРЖИ', tip1: 'Каждое новое нажатие добавляет силы. Удержание клавиши ничего не даёт, а если замедлишься, сила падает.',
-      tip2Head: 'ВЫДЕРЖИ АТАКУ', tip2: 'Красный <b>!</b> предупреждает о мощном рывке соперника. Жми ещё быстрее, чтобы устоять.',
-      tip3Head: 'ЛОВИ УСТАЛОСТЬ', tip3: 'После атаки соперник устаёт. Это твой момент: выложись по полной!',
-      howFoot: 'Перетяни палку на свою сторону, чтобы выиграть раунд. <b>До двух побед</b>: выиграй 2 раунда и стань чемпионом.',
-      back: 'НАЗАД', you: 'ТЫ', blueCorner: 'СИНИЙ УГОЛ', opponent: 'СОПЕРНИК', win: 'ПОБЕДА',
-      round: 'РАУНД {n}', finalRound: 'ФИНАЛЬНЫЙ РАУНД', go: 'ТЯНИ!',
-      spaceKey: 'ПРОБЕЛ', toPull: 'ЧТОБЫ ТЯНУТЬ', pullPower: 'СИЛА ТЯГИ', tapsPerSec: 'нажатий/с', opponentForce: 'Сила соперника',
-      roundWon: 'РАУНД ВЫИГРАН!', roundLost: 'РАУНД ПРОИГРАН!', roundSub: 'ТЫ {p} : {a} СОПЕРНИК',
-      nextRound: 'СЛЕДУЮЩИЙ РАУНД', pressEnter: 'нажми <kbd>ENTER</kbd>',
-      champ: 'ТЫ ЧЕМПИОН!', defeat: 'ПОРАЖЕНИЕ — ПОПРОБУЙ ЕЩЁ!', finalScore: 'ИТОГОВЫЙ СЧЁТ {p} : {a}  ·  {diff}',
-      rematch: 'РЕВАНШ', mainMenu: 'ГЛАВНОЕ МЕНЮ', matchHint: '<kbd>ENTER</kbd> реванш &nbsp;·&nbsp; <kbd>ESC</kbd> меню',
-      attackIncoming: 'ГОТОВИТСЯ АТАКА!', attackNow: 'АТАКА СОПЕРНИКА! ДЕРЖИСЬ!', lastStand: '!! ПОСЛЕДНИЙ РЫВОК !!',
-      desperation: 'ОТЧАЯННАЯ АТАКА!', tired: 'СОПЕРНИК УСТАЛ — ТЯНИ!',
-      popYes: 'ДА!', popOof: 'ОХ!', popHyaa: 'ХЭЙ!', popLastStand: 'ПОСЛЕДНИЙ РЫВОК!', popRaaagh: 'РРРАА!', popHuff: 'уф... уф...',
-      muteTitle: 'Вкл/выкл звук (M)', language: 'Язык',
-      faqBtn: 'ВОПРОСЫ', faqTitle: 'ЧАСТЫЕ ВОПРОСЫ',
-      q1: 'Что это за игра?',
-      a1: '«Таяк тартыш» по-кыргызски значит «перетягивание палки». Это древнее силовое состязание кочевых народов Центральной Азии. Два борца садятся лицом друг к другу, упираются ногами в деревянную доску и берутся за одну палку. Побеждает тот, кто перетянет соперника через доску или вырвет у него палку. Пастухи так проверяли силу и выносливость, а на праздниках и тоях целые аилы собирались у юрт, чтобы поболеть за борцов. Близкий родственник этой игры, якутский мас-рестлинг, и сегодня популярен во всём мире.',
-      q2: 'Как сменить язык?',
-      a2: 'Нажми кнопку с глобусом в правом верхнем углу главного меню (она есть и здесь, на экранах справки). Выбери English, Кыргызча, Русский или 中文, и вся игра сразу переключится. Игра запомнит твой выбор.',
-      q3: 'Кто создал игру?',
-      a3: 'Игру «Таяк Тартыш» создал Нурсултан в сотрудничестве с Claude AI для своего курса «Perspectives on the Humanities».'
-    },
-    zh: {
-      code: '中文', title: '拔棍大赛', subtitle: '游牧民族的力量较量', play: '开始游戏',
-      difficulty: '难度', easy: '简单', medium: '中等', hard: '困难',
-      easyTitle: '村里新手', mediumTitle: '熟练摔跤手', hardTitle: '游牧冠军',
-      howBtn: '玩法说明', menuFoot: '<kbd>ENTER</kbd> 开始 &nbsp;·&nbsp; <kbd>M</kbd> 静音',
-      howTitle: '玩法说明',
-      howLead: '连续按 <kbd>空格键</kbd>，把木棍拉向自己。对手会奋力反击。拉得更猛、更快才能获胜！',
-      tip1Head: '连按，别按住', tip1: '每次重新按下都会增加拉力。按住不放没有用，按得慢了力量就会减弱。',
-      tip2Head: '顶住进攻', tip2: '红色 <b>!</b> 表示对手即将猛力回拉。按得更快才能守住阵地。',
-      tip3Head: '趁其疲惫', tip3: '对手进攻后会疲惫。这是你的机会：全力出击！',
-      howFoot: '把木棍完全拉到你这边即赢得一局。<b>三局两胜</b>：赢下 2 局即成为冠军。',
-      back: '返回', you: '你', blueCorner: '蓝方', opponent: '对手', win: '胜',
-      round: '第 {n} 局', finalRound: '决胜局', go: '拉！',
-      spaceKey: '空格键', toPull: '拉棍', pullPower: '拉力', tapsPerSec: '次/秒', opponentForce: '对手力量',
-      roundWon: '本局获胜！', roundLost: '本局失利！', roundSub: '你 {p} : {a} 对手',
-      nextRound: '下一局', pressEnter: '按 <kbd>ENTER</kbd>',
-      champ: '你是冠军！', defeat: '失败了，再试一次！', finalScore: '最终比分 {p} : {a}  ·  {diff}',
-      rematch: '再战一场', mainMenu: '主菜单', matchHint: '<kbd>ENTER</kbd> 再战 &nbsp;·&nbsp; <kbd>ESC</kbd> 菜单',
-      attackIncoming: '对手要进攻了！', attackNow: '对手进攻！顶住！', lastStand: '!! 背水一战 !!',
-      desperation: '拼死反扑！', tired: '对手累了，快拉！',
-      popYes: '好！', popOof: '哎哟！', popHyaa: '嘿呀！', popLastStand: '背水一战！', popRaaagh: '啊啊啊！', popHuff: '呼……呼……',
-      muteTitle: '声音开关 (M)', language: '语言',
-      faqBtn: '常见问题', faqTitle: '常见问题',
-      q1: '这是什么游戏？',
-      a1: '“Tayak Tartysh”在吉尔吉斯语中意为“拔棍”。这是中亚游牧民族一项古老的力量比赛：两名选手面对面坐下，双脚抵住一块木板，一起握住同一根木棍。谁把对手拉过木板，或把木棍夺到手，谁就获胜。牧民们用它来比试力气和耐力；每逢节日和喜庆聚会，整个村子都会聚在毡房旁为选手加油。与它相近的雅库特“木棍角力”（mas-wrestling）如今仍在世界各地流行。',
-      q2: '如何切换语言？',
-      a2: '点击主菜单右上角的地球按钮（在这几个帮助页面上也能看到）。选择 English、Кыргызча、Русский 或 中文，整个游戏会立即切换，并且会记住你的选择。',
-      q3: '谁制作了这款游戏？',
-      a3: '这款游戏由铁御龙（Nursultan）与 Claude AI 合作制作，是他为“Perspectives on the Humanities”课程完成的作品。'
-    }
-  };
+  // UI text: STRINGS comes from strings.js
   let lang = 'en';
   function t(key, vars) {
     let str = STRINGS[lang][key] ?? STRINGS.en[key] ?? key;
@@ -467,8 +431,10 @@ function bootGame() {
   /** Shrink a single-line element's font until it fits maxW stage pixels (long translations). */
   function fitText(el, maxW) {
     el.style.fontSize = '';
-    const w = el.scrollWidth;
-    if (w > maxW) el.style.fontSize = (parseFloat(getComputedStyle(el).fontSize) * maxW / w).toFixed(1) + 'px';
+    // padding does not shrink with the text, so repeat a few times until it fits
+    for (let i = 0; i < 4 && el.scrollWidth > maxW; i++) {
+      el.style.fontSize = (parseFloat(getComputedStyle(el).fontSize) * Math.max(0.5, maxW / el.scrollWidth) * 0.98).toFixed(1) + 'px';
+    }
   }
   /** The WIN zones are flex boxes, so measure their text with a Range (ratio is unaffected by stage scaling). */
   function fitZones() {
@@ -484,6 +450,10 @@ function bootGame() {
     fitText(ui.title, 1120);
     fitText(ui.faqTitle, 770);
     fitZones();
+    document.querySelectorAll('.np-name').forEach((el) => fitText(el, el.parentElement.clientWidth - 24));
+    // single-line buttons and labels: shrink long translations instead of clipping them
+    document.querySelectorAll('.menu-links .btn, .mode-btn, .tab, .twop-badge, .diff-btn b, .diff-btn .opp-name, .bar-label, .tired-tag')
+      .forEach((el) => { if (el.offsetParent) fitText(el, el.clientWidth); });
   }
   function applyLang(code) {
     lang = STRINGS[code] ? code : 'en';
@@ -495,6 +465,7 @@ function bootGame() {
     ui.muteBtn.setAttribute('aria-label', t('muteTitle'));
     ui.langCode.textContent = t('code');
     ui.langItems.forEach((b) => b.classList.toggle('selected', b.dataset.lang === lang));
+    refreshDynamicText();
     refit();
     try { localStorage.setItem('tayak-lang', lang); } catch (e) { /* ignore */ }
   }
@@ -754,10 +725,13 @@ function bootGame() {
      ====================================================================== */
   const game = {
     state: S.MENU,
+    mode: '1p',             // '1p' vs the AI, '2p' two humans on one device
+    input: 'keyboard',      // which hints to show: 'keyboard' or 'touch' (both inputs always work)
     difficulty: 'medium',
     round: 1,
-    playerWins: 0,
-    aiWins: 0,
+    leftWins: 0,
+    rightWins: 0,
+    factDeck: [],           // fact numbers not yet shown this match
     sim: null,
     endInfo: null,
     cd: null,
@@ -767,10 +741,7 @@ function bootGame() {
     flash: 0,
     crowd: 0.25,
     crowdBoost: 0,
-    tapTimes: [],
-    tapCount: 0,
-    lastTap: -1,
-    tapRate: 0,
+    taps: { left: { times: [], count: 0, last: -1, rate: 0 }, right: { times: [], count: 0, last: -1, rate: 0 } },
     menuPull: 0
   };
 
@@ -1444,6 +1415,7 @@ function bootGame() {
       tHead = -adv * 0.1;
       tTremble = w.effort > 0.5 ? (w.effort - 0.5) * 3 : 0;
       if (p.underAttack) tTremble += 1;
+      if (p.tired) { tTheta -= 0.06; tHead += 0.2; tTremble += 0.6; }
       const ai = p.ai;
       if (ai) {
         const strike = ai.phase === 'strike';
@@ -1527,6 +1499,7 @@ function bootGame() {
     if (p.mode === 'win') return p.t < 1.3 ? 'shout' : 'joy';
     if (p.mode === 'lose') return 'dizzy';
     if (p.idle) return w.effort > 0.45 ? 'grit' : 'focus';
+    if (p.tired) return 'tired';
     const ai = p.ai;
     if (ai) {
       const strike = ai.phase === 'strike';
@@ -2128,7 +2101,7 @@ function bootGame() {
     const r = game.sim;
     if (!r || game.state !== S.PLAYING) return;
     const ai = r.ai;
-    if (ai.state !== AIState.ATTACK && ai.state !== AIState.DESPERATION) return;
+    if (!ai || (ai.state !== AIState.ATTACK && ai.state !== AIState.DESPERATION)) return;
     const P = rival.pose;
     const cx = (P.hip.x + P.sh.x) / 2, cy = (P.hip.y + P.sh.y) / 2 - 10;
     const desp = ai.state === AIState.DESPERATION;
@@ -2152,7 +2125,7 @@ function bootGame() {
     const t = game.time;
     for (const w of [player, rival]) {
       const isAI = w === rival;
-      const strike = isAI && r.ai.phase === 'strike';
+      const strike = isAI && !!r.ai && r.ai.phase === 'strike';
       const intensity = strike ? 1 : clamp((w.effort - 0.55) * 2.2, 0, 1);
       if (intensity <= 0.05) continue;
       const P = w.pose;
@@ -2178,7 +2151,7 @@ function bootGame() {
     const r = game.sim, t = game.time;
     if (r && game.state === S.PLAYING) {
       const ai = r.ai;
-      const warn = (ai.state === AIState.ATTACK || ai.state === AIState.DESPERATION) && ai.phase === 'windup';
+      const warn = !!ai && (ai.state === AIState.ATTACK || ai.state === AIState.DESPERATION) && ai.phase === 'windup';
       if (warn) {
         const desp = ai.state === AIState.DESPERATION;
         const P = rival.pose;
@@ -2208,7 +2181,7 @@ function bootGame() {
     // dizzy stars over the loser
     const ei = game.endInfo;
     if (ei && (game.state === S.ROUND_END || game.state === S.MATCH_END) && ei.t > 0.7) {
-      const loser = ei.winner === 'player' ? rival : player;
+      const loser = ei.winner === 'left' ? rival : player;
       const P = loser.pose;
       for (let i = 0; i < 3; i++) {
         const a = t * 3 + (i * TAU) / 3;
@@ -2408,7 +2381,25 @@ function bootGame() {
 
   /* ======================================================================
      FLOW: rounds, countdown, results
+     Sides: 'left' is player 1 (blue). 'right' is the AI in 1-player mode
+     and player 2 (red) in 2-player mode.
      ====================================================================== */
+  const SIDES = ['left', 'right'];
+  const FACT_COUNT = 8;
+  const isHuman = (side) => side === 'left' || game.mode === '2p';
+  const wrestlerOf = (side) => (side === 'left' ? player : rival);
+  // A phone held upright shows the rotate overlay; the match waits until it is turned back.
+  const portraitMQ = window.matchMedia ? window.matchMedia('(orientation: portrait) and (pointer: coarse)') : null;
+  const portraitPaused = () => !!portraitMQ && portraitMQ.matches;
+
+  function shuffle(a) {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
   function showScreen(el, on) { el.classList.toggle('show', on); }
 
   function setState(s) {
@@ -2422,7 +2413,9 @@ function bootGame() {
     ui.lang.classList.toggle('show', s === S.MENU || s === S.HOW_TO_PLAY || s === S.FAQ);
     setLangMenu(false);
     ui.hud.classList.toggle('show', s === S.COUNTDOWN || s === S.PLAYING || s === S.ROUND_END);
-    ui.spaceHint.classList.toggle('off', s !== S.PLAYING && s !== S.COUNTDOWN);
+    ui.hud.classList.toggle('meters-off', s !== S.PLAYING && s !== S.COUNTDOWN);
+    ui.touchZones.classList.toggle('show', s === S.COUNTDOWN && game.mode === '2p');
+    document.body.classList.toggle('in-match', s === S.COUNTDOWN || s === S.PLAYING);
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   }
 
@@ -2436,26 +2429,68 @@ function bootGame() {
   }
 
   function updateScoreUI() {
-    ui.scoreLabel.textContent = `${game.playerWins} : ${game.aiWins}`;
-    Array.from(ui.playerPips.children).forEach((el, i) => el.classList.toggle('on', i < game.playerWins));
-    Array.from(ui.aiPips.children).forEach((el, i) => el.classList.toggle('on', i < game.aiWins));
+    ui.scoreLabel.textContent = `${game.leftWins} : ${game.rightWins}`;
+    Array.from(ui.playerPips.children).forEach((el, i) => el.classList.toggle('on', i < game.leftWins));
+    Array.from(ui.aiPips.children).forEach((el, i) => el.classList.toggle('on', i < game.rightWins));
+  }
+
+  /** Text that depends on the language, the mode, the input type or the chosen opponent. */
+  function refreshDynamicText() {
+    const two = game.mode === '2p', touch = game.input === 'touch', d = game.difficulty;
+    document.body.classList.toggle('mode-2p', two);
+    document.body.classList.toggle('mode-1p', !two);
+    ui.leftName.textContent = two ? t('p1') : t('you');
+    ui.rightName.textContent = two ? t('p2') : t(d + 'Name');
+    ui.rightSub.textContent = two ? t('redCorner') : t(d + 'Title').toUpperCase();
+    ui.oppStory.innerHTML = `<b>${t(d + 'Name')}</b> · ${t(d + 'Title')}<br>${t(d + 'Story')}`;
+    const keys = { left: two ? 'A' : t('spaceKey'), right: 'L' };
+    for (const side of SIDES) {
+      const m = ui.meters[side];
+      m.key.textContent = keys[side];
+      m.key.classList.toggle('wide', !two);
+      m.hint.textContent = touch ? t('tapToPull') : t('toPull');
+    }
+    ui.tzLeft.textContent = touch ? t('tapHere', { p: t('p1') }) : t('pressKey', { p: t('p1'), k: 'A' });
+    ui.tzRight.textContent = touch ? t('tapHere', { p: t('p2') }) : t('pressKey', { p: t('p2'), k: 'L' });
+    document.querySelectorAll('.np-name').forEach((el) => fitText(el, el.parentElement.clientWidth - 24));
+  }
+
+  function setMode(mode) {
+    game.mode = mode === '2p' ? '2p' : '1p';
+    ui.modeBtns.forEach((b) => {
+      const on = b.dataset.mode === game.mode;
+      b.classList.toggle('selected', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    refreshDynamicText();
+    refit();
+  }
+
+  /** Hints follow the input actually used; both inputs always work. */
+  function setInputMode(mode) {
+    if (game.input === mode) return;
+    game.input = mode;
+    document.body.classList.toggle('input-touch', mode === 'touch');
+    document.body.classList.toggle('input-keyboard', mode !== 'touch');
+    refreshDynamicText();
   }
 
   function startMatch() {
-    game.playerWins = 0;
-    game.aiWins = 0;
+    game.leftWins = 0;
+    game.rightWins = 0;
     game.round = 1;
+    game.factDeck = shuffle(Array.from({ length: FACT_COUNT }, (_, i) => i + 1));
     confetti.length = 0;
-    ui.aiDiff.textContent = t(game.difficulty + 'Title').toUpperCase();
+    refreshDynamicText();
     startRound();
   }
 
   function startRound() {
-    game.sim = createRound(game.difficulty);
+    game.sim = createRound(game.difficulty, { mode: game.mode });
     game.endInfo = null;
     game.cd = { t: 0, step: -1 };
-    game.tapTimes.length = 0;
-    game.tapRate = 0;
+    for (const side of SIDES) Object.assign(game.taps[side], { times: [], count: 0, last: -1, rate: 0 });
+    activePointers.clear();
     stick.nudge = 0;
     ui.roundLabel.textContent = t('round', { n: game.round });
     updateScoreUI();
@@ -2485,20 +2520,29 @@ function bootGame() {
 
   function endRound(winner) {
     if (game.state !== S.PLAYING || game.endInfo) return; // never score twice
-    if (winner === 'player') game.playerWins++;
-    else game.aiWins++;
-    const matchOver = game.playerWins >= 2 || game.aiWins >= 2;
+    if (winner === 'left') game.leftWins++;
+    else game.rightWins++;
+    const matchOver = game.leftWins >= 2 || game.rightWins >= 2;
     game.endInfo = { winner, t: 0, overlay: false, matchOver };
     setState(S.ROUND_END);
     updateScoreUI();
     game.shake = Math.max(game.shake, 9);
     game.crowdBoost = 3;
-    if (winner === 'player') Sound.roundWin();
+    const cheer = winner === 'left' || game.mode === '2p'; // in 2P someone in the room always won
+    if (cheer) Sound.roundWin();
     else Sound.roundLose();
-    Sound.grunt(winner === 'ai');
+    Sound.grunt(winner === 'right');
     spawnDust(ARENA.boardX, ARENA.groundY - 4, 14, 120);
-    const loser = winner === 'player' ? rival : player;
-    addPopup(winner === 'player' ? t('popYes') : t('popOof'), loser.pose.head.x, loser.pose.head.y - 70, winner === 'player' ? '#7cc2ff' : '#ff6a5c', 38);
+    const loser = winner === 'left' ? rival : player;
+    addPopup(cheer ? t('popYes') : t('popOof'), loser.pose.head.x, loser.pose.head.y - 70, winner === 'left' ? '#7cc2ff' : '#ff6a5c', 38);
+  }
+
+  /** One "Did you know?" fact per round, never repeated within a match. */
+  function showFact() {
+    if (!game.factDeck.length) game.factDeck = shuffle(Array.from({ length: FACT_COUNT }, (_, i) => i + 1));
+    const n = game.factDeck.pop();
+    ui.factCard.dataset.fact = n;
+    ui.factText.textContent = t('fact' + n);
   }
 
   function updateRoundEnd(dt) {
@@ -2506,36 +2550,54 @@ function bootGame() {
     ei.t += dt;
     if (!ei.overlay && ei.t > 1.6) {
       ei.overlay = true;
-      const won = ei.winner === 'player';
-      ui.roundTitle.textContent = won ? t('roundWon') : t('roundLost');
-      ui.roundTitle.className = 'result-title ' + (won ? 'won' : 'lost');
+      const leftWon = ei.winner === 'left';
+      if (game.mode === '2p') {
+        ui.roundTitle.textContent = t('roundWonBy', { n: leftWon ? 1 : 2 });
+        ui.roundSub.textContent = t('roundSub2p', { p: game.leftWins, a: game.rightWins });
+      } else {
+        ui.roundTitle.textContent = leftWon ? t('roundWon') : t('roundLost');
+        ui.roundSub.textContent = t('roundSub', { p: game.leftWins, a: game.rightWins, name: t(game.difficulty + 'Name') });
+      }
+      ui.roundTitle.className = 'result-title ' + (leftWon ? 'won' : 'lost');
       fitText(ui.roundTitle, 1180);
-      ui.roundSub.textContent = t('roundSub', { p: game.playerWins, a: game.aiWins });
+      showFact();
       ui.nextBtn.style.display = ei.matchOver ? 'none' : '';
       ui.roundHint.style.display = ei.matchOver ? 'none' : '';
       showScreen(ui.roundEnd, true);
       ui.hud.classList.remove('show');
     }
-    if (ei.matchOver && ei.t > 3.5) goMatchEnd();
+    if (ei.matchOver && ei.t > 5) goMatchEnd(); // a little longer, so the last fact can be read
   }
 
   function goMatchEnd() {
-    const won = game.playerWins > game.aiWins;
+    const leftWon = game.leftWins > game.rightWins;
+    const score = t('finalScore', { p: game.leftWins, a: game.rightWins });
     setState(S.MATCH_END);
-    ui.matchTitle.textContent = won ? t('champ') : t('defeat');
-    ui.matchTitle.className = 'result-title big ' + (won ? 'champ' : 'lost');
+    if (game.mode === '2p') {
+      ui.matchTitle.textContent = t('champ2p', { n: leftWon ? 1 : 2 });
+      ui.matchTitle.className = 'result-title big champ ' + (leftWon ? 'champ-blue' : 'champ-red');
+      ui.matchSub.textContent = score;
+      ui.trophy.style.display = '';
+    } else {
+      const names = { name: t(game.difficulty + 'Name'), obj: t(game.difficulty + 'Obj') };
+      ui.matchTitle.textContent = leftWon ? t('champ') : t('defeat');
+      ui.matchTitle.className = 'result-title big ' + (leftWon ? 'champ' : 'lost');
+      ui.matchSub.textContent = `${leftWon ? t('beatOpp', names) : t('lostOpp', names)}  ·  ${score}`;
+      ui.trophy.style.display = leftWon ? '' : 'none';
+    }
     fitText(ui.matchTitle, 1160);
-    ui.matchSub.textContent = t('finalScore', { p: game.playerWins, a: game.aiWins, diff: t(game.difficulty + 'Title').toUpperCase() });
-    ui.trophy.style.display = won ? '' : 'none';
-    game.crowdBoost = won ? 6 : 2;
-    if (won) { Sound.matchWin(); spawnConfetti(160); }
+    fitText(ui.matchSub, 1180);
+    const celebrate = leftWon || game.mode === '2p';
+    game.crowdBoost = celebrate ? 6 : 2;
+    if (celebrate) { Sound.matchWin(); spawnConfetti(160); }
     else Sound.matchLose();
   }
 
   function updateMatchEnd(dt) {
     const ei = game.endInfo;
     if (ei) ei.t += dt;
-    if (game.playerWins > game.aiWins && game.stateTime < 5 && Math.random() < dt * 8) spawnConfetti(10);
+    const celebrate = game.leftWins > game.rightWins || game.mode === '2p';
+    if (celebrate && game.stateTime < 5 && Math.random() < dt * 8) spawnConfetti(10);
   }
 
   function nextRound() {
@@ -2553,6 +2615,12 @@ function bootGame() {
   }
 
   function handleSimEvent(ev) {
+    if (ev.type === 'exhausted') {
+      const P = wrestlerOf(ev.side).pose;
+      if (P) addPopup(t('popHuff'), P.head.x, P.head.y - 60, '#e8e8f0', 22);
+      Sound.recovery();
+      return;
+    }
     const P = rival.pose;
     if (!P) return;
     const hx = P.head.x, hy = P.head.y;
@@ -2587,22 +2655,28 @@ function bootGame() {
     }
   }
 
-  function onPullPressed() {
-    if (game.state !== S.PLAYING || !game.sim || game.sim.winner) return;
+  /** One fresh tap or key press for a human side. */
+  function onPull(side) {
+    const r = game.sim;
+    if (game.state !== S.PLAYING || !r || r.winner || !isHuman(side)) return;
+    const tp = game.taps[side];
     const now = performance.now() / 1000;
-    if (now - game.lastTap < B.minTapInterval) return;
-    game.lastTap = now;
-    if (!registerPull(game.sim)) return;
-    game.tapTimes.push(now);
-    game.tapCount++;
-    player.kick = Math.min(1.4, player.kick + 0.7);
-    stick.nudge -= 2.2;
-    Sound.pull(game.sim.playerForce / B.playerMaxForce);
-    if (game.tapCount % 8 === 0) Sound.grunt(false);
-    if (player.pose) spawnPuff(player.pose.hands[1].x, player.pose.hands[1].y);
-    ui.spaceKey.classList.remove('hit');
-    void ui.spaceKey.offsetWidth;
-    ui.spaceKey.classList.add('hit');
+    if (now - tp.last < B.minTapInterval) return;
+    tp.last = now;
+    if (!registerPull(r, side)) return;
+    tp.times.push(now);
+    tp.count++;
+    const w = wrestlerOf(side);
+    const puller = side === 'left' ? r.left : r.right;
+    w.kick = Math.min(1.4, w.kick + 0.7);
+    stick.nudge += side === 'left' ? -2.2 : 2.2;
+    Sound.pull(puller.force / B.maxForce);
+    if (tp.count % 8 === 0) Sound.grunt(side === 'right');
+    if (w.pose) spawnPuff(w.pose.hands[1].x, w.pose.hands[1].y);
+    const key = ui.meters[side].key;
+    key.classList.remove('hit');
+    void key.offsetWidth;
+    key.classList.add('hit');
   }
 
   /* ======================================================================
@@ -2611,15 +2685,19 @@ function bootGame() {
   function updateActors(dt) {
     const st = game.state, r = game.sim, ei = game.endInfo;
     const inMatch = !!r && (st === S.COUNTDOWN || st === S.PLAYING || st === S.ROUND_END || st === S.MATCH_END);
-    let pull, pEff, aEff, aiInfo = null;
+    let pull, pEff, aEff, aiInfo = null, tiredL = false, tiredR = false;
     if (inMatch) {
       pull = r.pullPosition;
       if (st === S.COUNTDOWN) {
         pEff = 0.22; aEff = 0.22;
       } else {
-        pEff = r.playerForce / B.playerMaxForce;
-        aEff = r.aiForce / (r.cfg.baseForce + r.cfg.attackBonus);
-        if (st === S.PLAYING) aiInfo = r.ai;
+        pEff = r.left.force / B.maxForce;
+        aEff = r.right ? r.right.force / B.maxForce : r.aiForce / (r.cfg.baseForce + r.cfg.attackBonus);
+        if (st === S.PLAYING) {
+          aiInfo = r.ai;
+          tiredL = r.left.tired;
+          tiredR = !!r.right && r.right.tired;
+        }
       }
     } else {
       game.menuPull = Math.sin(game.time * 0.55) * 24 + Math.sin(game.time * 1.4) * 7;
@@ -2631,18 +2709,18 @@ function bootGame() {
     const strike = !!aiInfo && aiInfo.phase === 'strike';
 
     animateWrestler(player, dt, {
-      mode: ending ? (ei.winner === 'player' ? 'win' : 'lose') : 'play',
-      adv: -pull / 100, effort: pEff, t: ending ? ei.t : 0, ai: null, underAttack: strike, idle: !inMatch
+      mode: ending ? (ei.winner === 'left' ? 'win' : 'lose') : 'play',
+      adv: -pull / 100, effort: pEff, t: ending ? ei.t : 0, ai: null, underAttack: strike, idle: !inMatch, tired: tiredL
     });
     animateWrestler(rival, dt, {
-      mode: ending ? (ei.winner === 'ai' ? 'win' : 'lose') : 'play',
-      adv: pull / 100, effort: aEff, t: ending ? ei.t : 0, ai: aiInfo, underAttack: false, idle: !inMatch
+      mode: ending ? (ei.winner === 'right' ? 'win' : 'lose') : 'play',
+      adv: pull / 100, effort: aEff, t: ending ? ei.t : 0, ai: aiInfo, underAttack: false, idle: !inMatch, tired: tiredR
     });
 
     // the shared stick
     stick.nudge = damp(stick.nudge, 0, 10, dt);
     if (ending) {
-      const s = ei.winner === 'player' ? -1 : 1;
+      const s = ei.winner === 'left' ? -1 : 1;
       const celebrate = ei.t >= 1.3;
       const bounce = celebrate ? Math.abs(Math.sin(game.time * 6)) * 6 : 0;
       const rate = ei.t < 0.45 ? 10 : 6;
@@ -2674,9 +2752,13 @@ function bootGame() {
           if (w.sweatIn <= 0) { spawnSweat(w); w.sweatIn = 0.12 + Math.random() * 0.2; }
         }
       }
-      if (r.ai.state === AIState.RECOVERY) {
-        rival.breathIn -= dt;
-        if (rival.breathIn <= 0) { spawnBreath(rival); rival.breathIn = 0.35; }
+      // heavy breathing: tired humans, or the AI catching its breath after an attack
+      for (const side of SIDES) {
+        const gasping = side === 'left' ? r.left.tired : r.right ? r.right.tired : r.ai.state === AIState.RECOVERY;
+        if (!gasping) continue;
+        const w = wrestlerOf(side);
+        w.breathIn -= dt;
+        if (w.breathIn <= 0) { spawnBreath(w); w.breathIn = 0.35; }
       }
       if (Math.abs(r.pullVelocity) > 9) {
         const loser = r.pullVelocity > 0 ? player : rival;
@@ -2690,7 +2772,7 @@ function bootGame() {
     if (st === S.PLAYING) target = 0.3 + (Math.abs(pull) / 100) * 0.35 + (strike ? 0.1 : 0);
     else if (st === S.COUNTDOWN) target = 0.3;
     else if (st === S.ROUND_END) target = 0.55;
-    else if (st === S.MATCH_END) target = game.playerWins > game.aiWins ? 0.8 : 0.5;
+    else if (st === S.MATCH_END) target = game.leftWins > game.rightWins || game.mode === '2p' ? 0.8 : 0.5;
     game.crowdBoost = Math.max(0, game.crowdBoost - dt);
     if (game.crowdBoost > 0) target = Math.max(target, 0.95);
     game.crowd = damp(game.crowd, target, 3, dt);
@@ -2710,17 +2792,28 @@ function bootGame() {
     else { ui.tugFill.style.left = '50%'; ui.tugFill.style.width = (p / 2) + '%'; }
     ui.tug.classList.toggle('lead-player', p < -2);
     ui.tug.classList.toggle('lead-ai', p > 2);
-    ui.powerFill.style.width = (r.playerForce / B.playerMaxForce) * 100 + '%';
-    ui.aiTick.style.left = clamp((r.aiForce / B.playerMaxForce) * 100, 0, 100) + '%';
 
     const now = performance.now() / 1000;
-    while (game.tapTimes.length && now - game.tapTimes[0] > 1.5) game.tapTimes.shift();
-    const raw = game.state === S.PLAYING ? game.tapTimes.length / 1.5 : 0;
-    game.tapRate = lerp(game.tapRate, raw, 0.15);
-    ui.tapRate.textContent = game.tapRate.toFixed(1);
+    for (const side of SIDES) {
+      const puller = side === 'left' ? r.left : r.right;
+      if (!puller) continue;
+      const m = ui.meters[side], tp = game.taps[side];
+      m.power.style.width = (puller.force / B.maxForce) * 100 + '%';
+      const level = puller.stamina / B.stamina.max;
+      m.stamina.style.width = level * 100 + '%';
+      const band = puller.tired || level <= 0.25 ? 'low' : level <= 0.55 ? 'mid' : 'high';
+      if (m.stamina.dataset.level !== band) m.stamina.dataset.level = band;
+      m.el.classList.toggle('tired', puller.tired);
+      while (tp.times.length && now - tp.times[0] > 1.5) tp.times.shift();
+      const raw = game.state === S.PLAYING ? tp.times.length / 1.5 : 0;
+      tp.rate = lerp(tp.rate, raw, 0.15);
+      m.rate.textContent = tp.rate.toFixed(1);
+    }
+    if (r.ai) ui.meters.left.tick.style.left = clamp((r.aiForce / B.maxForce) * 100, 0, 100) + '%';
 
+    // AI warnings (1 player only)
     let text = '', cls = '';
-    if (game.state === S.PLAYING) {
+    if (game.state === S.PLAYING && r.ai) {
       const ai = r.ai;
       if (ai.state === AIState.ATTACK) { text = ai.phase === 'windup' ? t('attackIncoming') : t('attackNow'); cls = 'danger'; }
       else if (ai.state === AIState.DESPERATION) { text = ai.phase === 'windup' ? t('lastStand') : t('desperation'); cls = 'desperate'; }
@@ -2737,11 +2830,13 @@ function bootGame() {
   function update(dt) {
     game.time += dt;
     game.stateTime += dt;
+    const paused = portraitPaused();
     switch (game.state) {
       case S.COUNTDOWN:
-        updateCountdown(dt);
+        if (!paused) updateCountdown(dt);
         break;
       case S.PLAYING: {
+        if (paused) break;
         const r = game.sim;
         stepRound(r, dt);
         for (const ev of r.events) handleSimEvent(ev);
@@ -2820,8 +2915,13 @@ function bootGame() {
 
   /* ======================================================================
      INPUT & UI WIRING
+     Keyboard: SPACE pulls in 1-player mode; A (player 1) and L (player 2)
+     in 2-player mode. Touch: a tap on the game area pulls; in 2-player mode
+     the left half is player 1 and the right half player 2 (multi-touch).
      ====================================================================== */
-  let spaceHeld = false;
+  const heldKeys = new Set();         // a held key never generates more pulls
+  const activePointers = new Map();   // pointerId → side, so each finger counts once
+  const PULL_KEYS = { Space: ['1p', 'left'], KeyA: ['2p', 'left'], KeyL: ['2p', 'right'] };
 
   function toggleMute() {
     Sound.setMuted(!Sound.muted);
@@ -2839,32 +2939,84 @@ function bootGame() {
   }
 
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' || e.key === ' ') {
-      e.preventDefault();
+    setInputMode('keyboard');
+    const code = e.code || (e.key === ' ' ? 'Space' : e.key);
+    const pull = PULL_KEYS[code];
+    if (pull) {
+      if (code === 'Space') e.preventDefault(); // no page scroll, no button activation
       Sound.init();
-      if (e.repeat || spaceHeld) return; // holding SPACE never generates more pulls
-      spaceHeld = true;
-      onPullPressed();
+      if (e.repeat || heldKeys.has(code)) return; // holding a key never generates more pulls
+      heldKeys.add(code);
+      if (pull[0] === game.mode) onPull(pull[1]);
       return;
     }
     if (e.repeat) return;
-    if (e.code === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); Sound.init(); onEnter(); }
-    else if (e.code === 'KeyM') { Sound.init(); toggleMute(); }
-    else if (e.code === 'Escape') {
+    if (code === 'Enter' || code === 'NumpadEnter') { e.preventDefault(); Sound.init(); onEnter(); }
+    else if (code === 'KeyM') { Sound.init(); toggleMute(); }
+    else if (code === 'Escape') {
       if (ui.lang.classList.contains('open')) { setLangMenu(false); return; }
       if (game.state === S.HOW_TO_PLAY || game.state === S.FAQ || game.state === S.MATCH_END) goMenu();
     }
   }, { capture: true });
 
   window.addEventListener('keyup', (e) => {
-    if (e.code === 'Space' || e.key === ' ') { e.preventDefault(); spaceHeld = false; }
+    const code = e.code || (e.key === ' ' ? 'Space' : e.key);
+    if (code === 'Space') e.preventDefault();
+    heldKeys.delete(code);
   }, { capture: true });
-  window.addEventListener('blur', () => { spaceHeld = false; });
-  window.addEventListener('pointerdown', () => Sound.init(), { capture: true });
+  window.addEventListener('blur', () => { heldKeys.clear(); activePointers.clear(); });
+
+  // Taps anywhere outside buttons pull, including the letterbox bars beside the stage.
+  window.addEventListener('pointerdown', (e) => {
+    Sound.init();
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') setInputMode('touch');
+    if (game.state !== S.PLAYING) return;
+    if (e.target.closest('button, .rotate') || activePointers.has(e.pointerId)) return;
+    const side = game.mode === '2p' && e.clientX >= window.innerWidth / 2 ? 'right' : 'left';
+    activePointers.set(e.pointerId, side);
+    onPull(side);
+  }, { capture: true });
+  const releasePointer = (e) => activePointers.delete(e.pointerId);
+  window.addEventListener('pointerup', releasePointer, { capture: true });
+  window.addEventListener('pointercancel', releasePointer, { capture: true });
+
+  // Fast tapping must never zoom or scroll the page (scrolling inside help panels still works).
+  document.addEventListener('touchstart', (e) => {
+    if (e.touches.length > 1 || !e.target.closest('button, .scroll-y')) e.preventDefault();
+  }, { passive: false });
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 1 || !e.target.closest('.scroll-y')) e.preventDefault();
+  }, { passive: false });
+  document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+  document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
 
   ui.playBtn.addEventListener('click', () => { Sound.init(); Sound.click(); startMatch(); });
-  ui.howBtn.addEventListener('click', () => { Sound.init(); Sound.click(); setState(S.HOW_TO_PLAY); });
+  ui.modeBtns.forEach((btn) => btn.addEventListener('click', () => {
+    Sound.init();
+    Sound.click();
+    setMode(btn.dataset.mode);
+    btn.blur();
+  }));
+
+  // How to play: the tab that opens first follows the detected input type.
+  function selectTab(name) {
+    ui.tabs.forEach((tab) => {
+      const on = tab.dataset.tab === name;
+      tab.classList.toggle('selected', on);
+      tab.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    ui.tabPanels.forEach((panel) => { panel.hidden = panel.dataset.panel !== name; });
+  }
+  ui.howBtn.addEventListener('click', () => {
+    Sound.init();
+    Sound.click();
+    selectTab(game.input === 'touch' ? 'phone' : 'pc');
+    ui.howScroll.scrollTop = 0;
+    setState(S.HOW_TO_PLAY);
+  });
+  ui.tabs.forEach((tab) => tab.addEventListener('click', () => { Sound.click(); selectTab(tab.dataset.tab); tab.blur(); }));
   ui.backBtn.addEventListener('click', () => { Sound.click(); setState(S.MENU); });
+
   // FAQ: an accordion, one answer open at a time
   function openFaq(item) {
     ui.faqItems.forEach((it) => {
@@ -2873,18 +3025,26 @@ function bootGame() {
       it.querySelector('.faq-q').setAttribute('aria-expanded', open ? 'true' : 'false');
     });
   }
-  ui.faqBtn.addEventListener('click', () => { Sound.init(); Sound.click(); openFaq(null); setState(S.FAQ); });
+  ui.faqBtn.addEventListener('click', () => {
+    Sound.init();
+    Sound.click();
+    openFaq(null);
+    ui.faqList.scrollTop = 0;
+    setState(S.FAQ);
+  });
   ui.faqBackBtn.addEventListener('click', () => { Sound.click(); setState(S.MENU); });
   ui.faqItems.forEach((it) => it.querySelector('.faq-q').addEventListener('click', (e) => {
     Sound.click();
     openFaq(it);
     e.currentTarget.blur();
   }));
+
   ui.nextBtn.addEventListener('click', () => { Sound.click(); nextRound(); });
   ui.rematchBtn.addEventListener('click', () => { Sound.click(); startMatch(); });
   ui.menuBtn.addEventListener('click', () => { Sound.click(); goMenu(); });
   ui.muteBtn.addEventListener('click', () => { Sound.init(); toggleMute(); ui.muteBtn.blur(); });
   ui.muteBtn.classList.toggle('muted', Sound.muted);
+
   function setLangMenu(open) {
     ui.lang.classList.toggle('open', open);
     ui.langBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -2904,13 +3064,11 @@ function bootGame() {
     btn.blur();
   }));
   document.addEventListener('click', () => setLangMenu(false));
-  applyLang(initialLang());
-  // Cyrillic/Chinese fallback fonts load lazily, so re-fit once they arrive.
-  if (document.fonts) document.fonts.addEventListener('loadingdone', refit);
 
   ui.diffBtns.forEach((btn) => btn.addEventListener('click', () => {
     game.difficulty = btn.dataset.diff;
     ui.diffBtns.forEach((b) => b.classList.toggle('selected', b === btn));
+    refreshDynamicText();
     Sound.init();
     Sound.click();
     btn.blur();
@@ -2919,9 +3077,25 @@ function bootGame() {
   /* ======================================================================
      BOOT
      ====================================================================== */
+  // Initial hint mode from the primary pointer; real input switches it later.
+  const coarsePointer = !!window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  game.input = coarsePointer ? 'touch' : 'keyboard';
+  document.body.classList.toggle('input-touch', coarsePointer);
+  document.body.classList.toggle('input-keyboard', !coarsePointer);
+
+  applyLang(initialLang());
+  // Cyrillic/Chinese fallback fonts load lazily, so re-fit once they arrive.
+  if (document.fonts) document.fonts.addEventListener('loadingdone', refit);
+
   function resize() {
     const k = Math.min(window.innerWidth / W, window.innerHeight / H);
     stage.style.transform = `translate(-50%, -50%) scale(${k})`;
+    // Phones: the stage is drawn small, so the interface switches to larger text and touch targets.
+    const compact = k < 0.75;
+    if (document.body.classList.contains('compact') !== compact) {
+      document.body.classList.toggle('compact', compact);
+      refit();
+    }
     const pr = clamp(k * (window.devicePixelRatio || 1), 1, 2.5);
     if (!layers.sky || Math.abs(pr - pixelRatio) > 0.01) {
       pixelRatio = pr;
@@ -2931,6 +3105,7 @@ function bootGame() {
     }
   }
   window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 200));
   resize();
 
   player.pose = computePose(player);
@@ -2949,5 +3124,5 @@ function bootGame() {
   requestAnimationFrame(frame);
 
   // Debug / test hook
-  window.TAYAK = { game, BALANCE, GameState, startMatch, goMenu, pull: onPullPressed };
+  window.TAYAK = { game, BALANCE, GameState, startMatch, goMenu, setMode, setInputMode, pull: onPull };
 }
