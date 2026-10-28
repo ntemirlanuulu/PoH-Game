@@ -2,14 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Tayak Tartysh — The Nomadic Pulling Challenge</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@700;800;900&family=Rubik:wght@800&family=Noto+Sans+SC:wght@900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="input-keyboard mode-1p">
   <div id="stage">
     <canvas id="game" width="1280" height="720"></canvas>
 
@@ -17,7 +19,7 @@
     <div id="hud">
       <div class="hud-top">
         <div class="nameplate player">
-          <div class="np-name" data-i18n="you">YOU</div>
+          <div class="np-name" id="leftName">YOU</div>
           <div class="np-sub" data-i18n="blueCorner">BLUE CORNER</div>
           <div class="pips" id="playerPips"><i></i><i></i></div>
         </div>
@@ -37,23 +39,47 @@
         </div>
 
         <div class="nameplate ai">
-          <div class="np-name" data-i18n="opponent">OPPONENT</div>
-          <div class="np-sub" id="aiDiff">SKILLED WRESTLER</div>
+          <div class="np-name" id="rightName">AIBEK</div>
+          <div class="np-sub" id="rightSub">SKILLED WRESTLER</div>
           <div class="pips" id="aiPips"><i></i><i></i></div>
         </div>
       </div>
 
       <div id="alert"></div>
 
-      <div class="hud-bottom" id="spaceHint">
-        <div class="space-row"><kbd id="spaceKey" data-i18n="spaceKey">SPACE</kbd><span data-i18n="toPull">TO PULL</span></div>
-        <div class="power">
-          <span class="power-label" data-i18n="pullPower">PULL POWER</span>
-          <div class="power-bar">
-            <div class="power-fill" id="powerFill"></div>
-            <div class="ai-tick" id="aiTick" data-i18n-title="opponentForce" title="Opponent force"></div>
+      <!-- 2-player countdown: where each player taps or which key they press -->
+      <div id="touchZones" class="touch-zones" aria-hidden="true">
+        <div class="tz tz-left"><span id="tzLeft">PLAYER 1: TAP HERE</span></div>
+        <div class="tz-divider"></div>
+        <div class="tz tz-right"><span id="tzRight">PLAYER 2: TAP HERE</span></div>
+      </div>
+
+      <div class="hud-bottom" id="hudBottom">
+        <div class="meter meter-left" id="meterL">
+          <div class="meter-hint"><kbd class="key">SPACE</kbd><span class="hint-text">TO PULL</span></div>
+          <div class="bar-row">
+            <span class="bar-label" data-i18n="pullPower">PULL POWER</span>
+            <div class="power-bar"><div class="power-fill"></div><div class="ai-tick" data-i18n-title="opponentForce" title="Opponent force"></div></div>
+            <span class="tap-rate"><b>0.0</b> <span data-i18n="tapsPerSec">taps/s</span></span>
           </div>
-          <span class="tap-rate"><b id="tapRate">0.0</b> <span data-i18n="tapsPerSec">taps/s</span></span>
+          <div class="bar-row">
+            <span class="bar-label" data-i18n="stamina">STAMINA</span>
+            <div class="stamina-bar"><div class="stamina-fill"></div></div>
+            <span class="tired-tag" data-i18n="tiredTag">TIRED!</span>
+          </div>
+        </div>
+        <div class="meter meter-right" id="meterR">
+          <div class="meter-hint"><kbd class="key">L</kbd><span class="hint-text">TO PULL</span></div>
+          <div class="bar-row">
+            <span class="bar-label" data-i18n="pullPower">PULL POWER</span>
+            <div class="power-bar"><div class="power-fill"></div></div>
+            <span class="tap-rate"><b>0.0</b> <span data-i18n="tapsPerSec">taps/s</span></span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label" data-i18n="stamina">STAMINA</span>
+            <div class="stamina-bar"><div class="stamina-fill"></div></div>
+            <span class="tired-tag" data-i18n="tiredTag">TIRED!</span>
+          </div>
         </div>
       </div>
     </div>
@@ -65,18 +91,41 @@
       <div class="panel menu-panel">
         <h1 class="title" data-i18n="title">TAYAK TARTYSH</h1>
         <p class="subtitle" data-i18n="subtitle">The Nomadic Pulling Challenge</p>
-        <button class="btn btn-play" id="playBtn" data-i18n="play">PLAY GAME</button>
-        <div class="diff">
-          <div class="diff-label" data-i18n="difficulty">DIFFICULTY</div>
-          <div class="diff-row">
-            <button class="diff-btn" data-diff="easy"><b data-i18n="easy">EASY</b><small data-i18n="easyTitle">Village Rookie</small></button>
-            <button class="diff-btn selected" data-diff="medium"><b data-i18n="medium">MEDIUM</b><small data-i18n="mediumTitle">Skilled Wrestler</small></button>
-            <button class="diff-btn" data-diff="hard"><b data-i18n="hard">HARD</b><small data-i18n="hardTitle">Nomadic Champion</small></button>
+        <div class="menu-cols">
+          <div class="menu-col menu-main">
+            <button class="btn btn-play" id="playBtn" data-i18n="play">PLAY GAME</button>
+            <div class="mode-toggle" role="group">
+              <button class="mode-btn selected" data-mode="1p" data-i18n="mode1p" aria-pressed="true">1 PLAYER</button>
+              <button class="mode-btn" data-mode="2p" data-i18n="mode2p" aria-pressed="false">2 PLAYERS</button>
+            </div>
+            <div class="menu-links">
+              <button class="btn btn-secondary" id="howBtn" data-i18n="howBtn">HOW TO PLAY</button>
+              <button class="btn btn-secondary btn-faq" id="faqBtn" data-i18n="faqBtn">FAQ</button>
+            </div>
+          </div>
+          <div class="menu-col menu-side">
+            <div class="diff" id="diffPanel">
+              <div class="diff-label" data-i18n="difficulty">DIFFICULTY</div>
+              <div class="diff-row">
+                <button class="diff-btn" data-diff="easy"><b data-i18n="easy">EASY</b><span class="opp-name" data-i18n="easyName">ERMEK</span><small data-i18n="easyTitle">Village Rookie</small></button>
+                <button class="diff-btn selected" data-diff="medium"><b data-i18n="medium">MEDIUM</b><span class="opp-name" data-i18n="mediumName">AIBEK</span><small data-i18n="mediumTitle">Skilled Wrestler</small></button>
+                <button class="diff-btn" data-diff="hard"><b data-i18n="hard">HARD</b><span class="opp-name" data-i18n="hardName">TEMIR</span><small data-i18n="hardTitle">Nomadic Champion</small></button>
+              </div>
+              <p class="opp-story" id="oppStory"></p>
+            </div>
+            <div class="twop" id="twoPPanel">
+              <div class="twop-title" data-i18n="twoPTitle">TWO WRESTLERS, ONE DEVICE</div>
+              <div class="twop-row">
+                <div class="twop-badge blue" data-i18n="p1">PLAYER 1</div>
+                <div class="twop-vs">VS</div>
+                <div class="twop-badge red" data-i18n="p2">PLAYER 2</div>
+              </div>
+              <p class="twop-text kbd-only" data-i18n-html="twoPKeys"></p>
+              <p class="twop-text touch-only" data-i18n="twoPTouch"></p>
+            </div>
           </div>
         </div>
-        <button class="btn btn-secondary" id="howBtn" data-i18n="howBtn">HOW TO PLAY</button>
-        <button class="btn btn-secondary btn-faq" id="faqBtn" data-i18n="faqBtn">FAQ</button>
-        <p class="menu-foot" data-i18n-html="menuFoot"><kbd>ENTER</kbd> start &nbsp;·&nbsp; <kbd>M</kbd> mute</p>
+        <p class="menu-foot kbd-only" data-i18n-html="menuFoot"><kbd>ENTER</kbd> start &nbsp;·&nbsp; <kbd>M</kbd> mute</p>
       </div>
     </section>
 
@@ -84,22 +133,59 @@
     <section id="howto" class="screen">
       <div class="panel card howto-panel">
         <h2 class="card-title" data-i18n="howTitle">HOW TO PLAY</h2>
-        <p class="howto-lead" data-i18n-html="howLead">Press <kbd>SPACE</kbd> repeatedly to pull the wooden stick toward you. Your opponent will fight back. Pull harder and faster to win!</p>
-        <div class="tips">
-          <div class="tip tip-blue">
-            <div class="tip-head" data-i18n="tip1Head">TAP, DON'T HOLD</div>
-            <p data-i18n-html="tip1">Every fresh press adds pulling power. Holding the key does nothing, and your power fades when you slow down.</p>
-          </div>
-          <div class="tip tip-red">
-            <div class="tip-head" data-i18n="tip2Head">SURVIVE ATTACKS</div>
-            <p data-i18n-html="tip2">A red <b>!</b> warns of a big counter-pull. Tap even faster to hold your ground.</p>
-          </div>
-          <div class="tip tip-green">
-            <div class="tip-head" data-i18n="tip3Head">PUNISH FATIGUE</div>
-            <p data-i18n-html="tip3">After attacking, your rival gets tired. That's your moment: go all out!</p>
-          </div>
+        <div class="tabs" role="tablist">
+          <button class="tab" role="tab" data-tab="pc" aria-selected="true" data-i18n="tabPc">LAPTOP / PC</button>
+          <button class="tab" role="tab" data-tab="phone" aria-selected="false" data-i18n="tabPhone">PHONE</button>
         </div>
-        <p class="howto-foot" data-i18n-html="howFoot">Drag the stick all the way to your side to win a round. <b>Best of three</b>: win 2 rounds to become champion.</p>
+        <div class="card-scroll scroll-y">
+          <div class="tab-panel" data-panel="pc">
+            <div class="mode-card">
+              <div class="mode-head" data-i18n="mode1p">1 PLAYER</div>
+              <div class="mode-art"><kbd class="big" data-i18n="spaceKey">SPACE</kbd></div>
+              <p data-i18n-html="howPc1"></p>
+            </div>
+            <div class="mode-card">
+              <div class="mode-head" data-i18n="mode2p">2 PLAYERS</div>
+              <div class="mode-art"><kbd class="big key-blue">A</kbd><kbd class="big key-red">L</kbd></div>
+              <p data-i18n-html="howPc2"></p>
+            </div>
+          </div>
+          <div class="tab-panel" data-panel="phone" hidden>
+            <div class="mode-card">
+              <div class="mode-head" data-i18n="mode1p">1 PLAYER</div>
+              <div class="mode-art">
+                <svg class="phone-art" viewBox="0 0 120 64" aria-hidden="true"><rect x="3" y="3" width="114" height="58" rx="10" fill="#2b1a14"/><rect x="11" y="9" width="98" height="46" rx="4" fill="#9fd3ff"/><circle cx="60" cy="32" r="9" fill="#2f7ae5" stroke="#fff" stroke-width="3"/><circle cx="60" cy="32" r="16" fill="none" stroke="#2f7ae5" stroke-width="2" opacity="0.5"/></svg>
+              </div>
+              <p data-i18n-html="howPhone1"></p>
+            </div>
+            <div class="mode-card">
+              <div class="mode-head" data-i18n="mode2p">2 PLAYERS</div>
+              <div class="mode-art">
+                <svg class="phone-art" viewBox="0 0 120 64" aria-hidden="true"><rect x="3" y="3" width="114" height="58" rx="10" fill="#2b1a14"/><rect x="11" y="9" width="49" height="46" rx="4" fill="#bfe0ff"/><rect x="60" y="9" width="49" height="46" rx="4" fill="#ffd0c9"/><line x1="60" y1="9" x2="60" y2="55" stroke="#fff" stroke-width="2" stroke-dasharray="4 3"/><circle cx="35" cy="32" r="8" fill="#2f7ae5" stroke="#fff" stroke-width="3"/><circle cx="85" cy="32" r="8" fill="#e0392f" stroke="#fff" stroke-width="3"/></svg>
+              </div>
+              <p data-i18n-html="howPhone2"></p>
+            </div>
+          </div>
+          <div class="tips">
+            <div class="tip tip-blue">
+              <div class="tip-head" data-i18n="tip1Head">TAP, DON'T HOLD</div>
+              <p data-i18n-html="tip1"></p>
+            </div>
+            <div class="tip tip-gold">
+              <div class="tip-head" data-i18n="tipStHead">WATCH YOUR STAMINA</div>
+              <p data-i18n-html="tipSt"></p>
+            </div>
+            <div class="tip tip-green">
+              <div class="tip-head" data-i18n="tip3Head">PUNISH FATIGUE</div>
+              <p data-i18n-html="tip3"></p>
+            </div>
+            <div class="tip tip-red">
+              <div class="tip-head" data-i18n="tip2Head">SURVIVE ATTACKS</div>
+              <p data-i18n-html="tip2"></p>
+            </div>
+          </div>
+          <p class="howto-foot" data-i18n-html="howFoot"></p>
+        </div>
         <button class="btn btn-secondary" id="backBtn" data-i18n="back">BACK</button>
       </div>
     </section>
@@ -108,7 +194,7 @@
     <section id="faq" class="screen">
       <div class="panel card faq-panel">
         <h2 class="card-title faq-title" id="faqTitle" data-i18n="faqTitle">FREQUENTLY ASKED QUESTIONS</h2>
-        <div class="faq-list">
+        <div class="faq-list card-scroll scroll-y">
           <div class="faq-item faq-blue">
             <button class="faq-q" aria-expanded="false"><span data-i18n="q1">What is the game?</span><i class="faq-icon" aria-hidden="true"></i></button>
             <div class="faq-a"><div><p data-i18n="a1"></p></div></div>
@@ -130,11 +216,15 @@
     <section id="roundEnd" class="screen result">
       <div class="panel result-panel">
         <div class="result-title" id="roundTitle">ROUND WON!</div>
-        <div class="result-sub" id="roundSub">YOU 1 : 0 OPPONENT</div>
+        <div class="result-sub" id="roundSub">YOU 1 : 0 AIBEK</div>
       </div>
+      <aside class="fact-card" id="factCard">
+        <div class="fact-head" data-i18n="factTitle">DID YOU KNOW?</div>
+        <p id="factText"></p>
+      </aside>
       <div class="result-actions">
         <button class="btn btn-play" id="nextBtn" data-i18n="nextRound">NEXT ROUND</button>
-        <div class="result-hint" id="roundHint" data-i18n-html="pressEnter">press <kbd>ENTER</kbd></div>
+        <div class="result-hint kbd-only" id="roundHint" data-i18n-html="pressEnter">press <kbd>ENTER</kbd></div>
       </div>
     </section>
 
@@ -156,7 +246,7 @@
           <button class="btn btn-play" id="rematchBtn" data-i18n="rematch">REMATCH</button>
           <button class="btn btn-secondary" id="menuBtn" data-i18n="mainMenu">MAIN MENU</button>
         </div>
-        <div class="result-hint" data-i18n-html="matchHint"><kbd>ENTER</kbd> rematch &nbsp;·&nbsp; <kbd>ESC</kbd> menu</div>
+        <div class="result-hint kbd-only" data-i18n-html="matchHint"><kbd>ENTER</kbd> rematch &nbsp;·&nbsp; <kbd>ESC</kbd> menu</div>
       </div>
     </section>
 
@@ -168,6 +258,7 @@
       </button>
       <div id="langMenu" class="lang-menu" role="menu">
         <button role="menuitem" data-lang="en">English</button>
+        <button role="menuitem" data-lang="de">Deutsch</button>
         <button role="menuitem" data-lang="ky">Кыргызча</button>
         <button role="menuitem" data-lang="ru">Русский</button>
         <button role="menuitem" data-lang="zh">中文</button>
@@ -180,6 +271,16 @@
     </button>
   </div>
 
+  <!-- ===== Phone held upright ===== -->
+  <div id="rotate" class="rotate" aria-live="polite">
+    <div class="rotate-inner">
+      <svg class="rotate-phone" viewBox="0 0 64 64" aria-hidden="true"><rect x="20" y="6" width="24" height="52" rx="5" fill="#fff6e0" stroke="#2b1a14" stroke-width="3"/><circle cx="32" cy="51" r="2.5" fill="#2b1a14"/></svg>
+      <div class="rotate-title" data-i18n="rotateTitle">ROTATE YOUR PHONE</div>
+      <p data-i18n="rotateText">Tayak Tartysh is played sideways. Turn your phone to landscape.</p>
+    </div>
+  </div>
+
+  <script src="strings.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
