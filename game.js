@@ -20,6 +20,9 @@
    it, each tap costs drainPerExcess × (rate − freeRate). At 0 the puller is
    "tired": impulse and force cap drop to tiredMultiplier until stamina climbs
    back past recoverAt. Refill starts regenDelay seconds after the last costly tap.
+
+   Pace (V3.1): the stick moves fast (positionScale) and each AI is weaker, so
+   rounds take roughly 9 s on Easy, 13-22 s on Medium and 15-25 s on Hard.
    --------------------------------------------------------------------------- */
 const BALANCE = {
   pullImpulse: 2.6,
@@ -27,19 +30,19 @@ const BALANCE = {
   forceDrag: 0.6,             // proportional decay, 1/second
   maxForce: 20,
   minTapInterval: 0.03,       // ignore key-switch chatter faster than this
-  positionScale: 1.1,
-  maxPositionSpeed: 14,
+  positionScale: 2.2,
+  maxPositionSpeed: 28,
   positionDamping: 4,
   roundLimit: 100,
   desperationZone: 72,        // AI may attempt a last stand at pullPosition <= -72
-  leverage: 2,                // the wrestler who is ahead gains leverage (breaks stalemates)
+  leverage: 4,                // the wrestler who is ahead gains leverage (breaks stalemates)
   aiForm: 0.08,               // per-round AI strength variation (±)
   aiDrift: 0.1,               // slow strength drift within a round (±)
 
   stamina: {
     max: 100,
     freeRate: 4,              // taps/s that never cost stamina
-    drainPerExcess: 0.32,     // stamina per tap, per tap/s above freeRate
+    drainPerExcess: 0.45,     // stamina per tap, per tap/s above freeRate
     rateSmoothing: 0.5,      // how fast the tap-rate estimate follows the latest gap
     regenDelay: 0.4,          // seconds after the last costly tap before refilling
     regenRate: 22,            // stamina per second → empty to full ≈ 4.5 s
@@ -49,8 +52,8 @@ const BALANCE = {
 
   ai: {
     easy: {
-      baseForce: 10,
-      attackBonus: 4,
+      baseForce: 7,
+      attackBonus: 3,
       attackInterval: [5, 8],
       attackDuration: [0.6, 1.2],
       windup: 0.8,
@@ -66,8 +69,8 @@ const BALANCE = {
       desperationBonus: 1.8
     },
     medium: {
-      baseForce: 14.5,
-      attackBonus: 6,
+      baseForce: 11.5,
+      attackBonus: 5,
       attackInterval: [4, 7],
       attackDuration: [0.8, 1.4],
       windup: 0.65,
@@ -83,7 +86,7 @@ const BALANCE = {
       desperationBonus: 1.9
     },
     hard: {
-      baseForce: 15.75,
+      baseForce: 15,
       attackBonus: 7,
       attackInterval: [3.5, 6],
       attackDuration: [0.8, 1.5],
@@ -381,11 +384,22 @@ function bootGame() {
   const LOOKS = {
     player: {
       skin: '#f2bf94', skinDark: '#d29b70', outfit: '#2f7ae5', outfitDark: '#1d55b0', outfitLight: '#8cc0ff',
-      trim: '#ffd23f', hair: '#1d1a24', style: 'player'
+      trim: '#ffd23f', hair: '#1d1a24', style: 'player', browWidth: 4.5
     },
-    ai: {
+    // Easy: Ermek, a young herder in a white kalpak. Soft colours, rosy cheeks, raised brows.
+    ermek: {
+      skin: '#f6caa0', skinDark: '#dba57a', outfit: '#ff8a5c', outfitDark: '#d9603a', outfitLight: '#ffd0b8',
+      trim: '#fff3c4', hair: '#7a4a26', style: 'ermek', blush: 0.35, browWidth: 3.5, browBias: -1.5
+    },
+    // Medium: Aibek, the shepherd: red singlet, handlebar moustache, topknot.
+    aibek: {
       skin: '#cf9262', skinDark: '#a97046', outfit: '#e0392f', outfitDark: '#a3221c', outfitLight: '#ff9a8a',
-      trim: '#ffd23f', hair: '#1a1416', style: 'ai'
+      trim: '#ffd23f', hair: '#1a1416', style: 'aibek', browWidth: 6, unibrow: true
+    },
+    // Hard: Temir, "iron": black singlet with red trim, shaved head, scar, beard, iron wrist wraps.
+    temir: {
+      skin: '#b98352', skinDark: '#94643c', outfit: '#2d2733', outfitDark: '#16121a', outfitLight: '#8a9099',
+      trim: '#e0392f', hair: '#141016', style: 'temir', browWidth: 8, browBias: 2.5, unibrow: true
     }
   };
 
@@ -405,6 +419,7 @@ function bootGame() {
     countdown: $('countdown'), roundLabel: $('roundLabel'), scoreLabel: $('scoreLabel'),
     playerPips: $('playerPips'), aiPips: $('aiPips'), tug: $('tug'), tugFill: $('tugFill'), tugMarker: $('tugMarker'),
     alert: $('alert'), leftName: $('leftName'), rightName: $('rightName'), rightSub: $('rightSub'),
+    rightPlate: document.querySelector('.nameplate.ai'),
     meters: { left: meterRefs($('meterL')), right: meterRefs($('meterR')) },
     touchZones: $('touchZones'), tzLeft: $('tzLeft'), tzRight: $('tzRight'),
     roundTitle: $('roundTitle'), roundSub: $('roundSub'), nextBtn: $('nextBtn'), roundHint: $('roundHint'),
@@ -758,7 +773,8 @@ function bootGame() {
     };
   }
   const player = createWrestler(-1, LOOKS.player);
-  const rival = createWrestler(1, LOOKS.ai);
+  const rival = createWrestler(1, LOOKS.aibek);
+  const OPPONENT_LOOKS = { easy: LOOKS.ermek, medium: LOOKS.aibek, hard: LOOKS.temir };
   const stick = { x: ARENA.boardX, y: ARENA.stickY, angle: 0, nudge: 0 };
 
   const particles = [];   // arena space
@@ -1884,23 +1900,30 @@ function bootGame() {
     ctx.scale(-s, 1);
     const t = game.time;
 
-    // back-of-head hair pieces (behind the head)
-    if (L.style === 'player') {
+    const st = L.style;
+    // back-of-head pieces (behind the head)
+    ctx.lineCap = 'round';
+    if (st === 'player') {
       const wv = Math.sin(t * 7) * 3;
-      ctx.lineCap = 'round';
       for (const [ex, ey] of [[-54, -8 + wv], [-50, 4 - wv]]) {
         ctx.strokeStyle = INK; ctx.lineWidth = 10;
         ctx.beginPath(); ctx.moveTo(-28, -18); ctx.quadraticCurveTo(-40, -16, ex, ey); ctx.stroke();
         ctx.strokeStyle = L.outfit; ctx.lineWidth = 5.5;
         ctx.beginPath(); ctx.moveTo(-28, -18); ctx.quadraticCurveTo(-40, -16, ex, ey); ctx.stroke();
       }
-    } else {
+    } else if (st === 'aibek') {
       const wv = Math.sin(t * 3) * 3;
-      ctx.lineCap = 'round';
       ctx.strokeStyle = INK; ctx.lineWidth = 14;
       ctx.beginPath(); ctx.moveTo(-22, -28); ctx.bezierCurveTo(-46, -22, -44 + wv, 0, -40 + wv, 20); ctx.stroke();
       ctx.strokeStyle = L.hair; ctx.lineWidth = 9;
       ctx.beginPath(); ctx.moveTo(-22, -28); ctx.bezierCurveTo(-46, -22, -44 + wv, 0, -40 + wv, 20); ctx.stroke();
+    } else if (st === 'ermek') {
+      // the kalpak's tassel swings behind
+      const wv = Math.sin(t * 4) * 2.5;
+      ctx.strokeStyle = INK; ctx.lineWidth = 3.5;
+      ctx.beginPath(); ctx.moveTo(-8, -62); ctx.quadraticCurveTo(-30, -58, -38 + wv, -36); ctx.stroke();
+      ctx.fillStyle = '#e0392f'; ctx.lineWidth = 2.5;
+      circle(ctx, -38 + wv, -33, 5); ctx.fill(); ctx.stroke();
     }
 
     union(headShapes, L.skin, 5);
@@ -1917,30 +1940,55 @@ function bootGame() {
       headShapes[1](); ctx.fill();
       ctx.restore();
     }
-    if (L.style === 'ai') {
-      // stubble + scalp shine
-      ctx.fillStyle = 'rgba(40,20,10,0.18)';
+    if (st === 'aibek' || st === 'temir') {
+      // stubble + scalp shine (Temir's head is shaved, so it shines more)
+      ctx.fillStyle = st === 'temir' ? 'rgba(20,10,5,0.3)' : 'rgba(40,20,10,0.18)';
       ctx.beginPath(); ctx.ellipse(10, 20, 20, 10, 0, 0, TAU); ctx.fill();
       ctx.fillStyle = 'rgba(255,255,255,0.32)';
-      ctx.beginPath(); ctx.ellipse(-6, -20, 11, 5, -0.4, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(-6, -20, st === 'temir' ? 14 : 11, st === 'temir' ? 6 : 5, -0.4, 0, TAU); ctx.fill();
     }
-    if (w.blush > 0.02) {
-      ctx.fillStyle = `rgba(255,90,110,${w.blush * 0.7})`;
+    if (st === 'ermek') {
+      // freckles
+      ctx.fillStyle = 'rgba(150,80,40,0.55)';
+      for (const [fx, fy] of [[0, 4], [4, 7], [-2, 9], [25, 5], [28, 8]]) { circle(ctx, fx, fy, 1.1); ctx.fill(); }
+    }
+    const blush = Math.max(w.blush, L.blush || 0);
+    if (blush > 0.02) {
+      ctx.fillStyle = `rgba(255,90,110,${blush * 0.7})`;
       ctx.beginPath(); ctx.ellipse(2, 9, 5, 3, 0, 0, TAU); ctx.fill();
       ctx.beginPath(); ctx.ellipse(24, 9, 4, 3, 0, 0, TAU); ctx.fill();
+    }
+    if (st === 'temir') {
+      // deep-set eyes under a heavy brow ridge
+      ctx.fillStyle = 'rgba(40,15,10,0.28)';
+      ctx.beginPath(); ctx.ellipse(12, -8, 20, 8, 0, 0, TAU); ctx.fill();
     }
 
     drawEye(4, -6, eType, false);
     drawEye(19, -6, eType, true);
 
+    if (st === 'temir') {
+      // old scar across the front eye
+      ctx.strokeStyle = '#a8433c';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(14, -26); ctx.lineTo(26, 4); ctx.stroke();
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      for (const k of [0.22, 0.5, 0.78]) {
+        const x = 14 + 12 * k, y = -26 + 30 * k;
+        ctx.moveTo(x - 4, y + 1.6); ctx.lineTo(x + 4, y - 1.6);
+      }
+      ctx.stroke();
+    }
+
     // brows
-    const a = e.brow;
+    const a = e.brow + (L.browBias || 0);
     ctx.strokeStyle = L.hair;
-    ctx.lineWidth = L.style === 'ai' ? 6 : 4.5;
+    ctx.lineWidth = L.browWidth || 4.5;
     ctx.beginPath();
     ctx.moveTo(-3, -16 - a * 0.5);
     ctx.lineTo(10, -16 + a * 0.5);
-    if (L.style !== 'ai') ctx.moveTo(14, -16 + a * 0.5);
+    if (!L.unibrow) ctx.moveTo(14, -16 + a * 0.5);
     ctx.lineTo(25, -16 - a * 0.5);
     ctx.stroke();
 
@@ -1948,9 +1996,27 @@ function bootGame() {
     ctx.fillStyle = 'rgba(80,35,20,0.6)';
     circle(ctx, 29, 6, 1.6); ctx.fill();
 
+    if (st === 'temir') {
+      // full black beard around the jaw (the mouth is drawn on top)
+      ctx.fillStyle = L.hair;
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-8, 2);
+      ctx.quadraticCurveTo(-6, 26, 6, 36);
+      ctx.quadraticCurveTo(18, 46, 31, 34);
+      ctx.quadraticCurveTo(37, 26, 34, 12);
+      ctx.quadraticCurveTo(28, 23, 17, 25);
+      ctx.quadraticCurveTo(5, 24, 1, 13);
+      ctx.quadraticCurveTo(-3, 7, -8, 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
     drawMouth(e.mouth);
 
-    if (L.style === 'ai') {
+    if (st === 'aibek') {
       // handlebar mustache
       ctx.fillStyle = L.hair;
       ctx.strokeStyle = INK;
@@ -1974,6 +2040,62 @@ function bootGame() {
       circle(ctx, -18, -30, 9); ctx.stroke(); ctx.fill();
       ctx.fillStyle = L.trim;
       ctx.fillRect(-24, -26, 11, 4);
+    } else if (st === 'temir') {
+      // heavy horseshoe moustache joining the beard
+      ctx.fillStyle = L.hair;
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(4, 18);
+      ctx.quadraticCurveTo(5, 8, 17, 8.5);
+      ctx.quadraticCurveTo(30, 8, 33, 18);
+      ctx.lineTo(29, 19);
+      ctx.quadraticCurveTo(26, 12.5, 17, 13);
+      ctx.quadraticCurveTo(9, 12.5, 8, 19);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // iron ear ring
+      ctx.strokeStyle = '#9aa0a8';
+      ctx.lineWidth = 2.5;
+      circle(ctx, -11, 13, 4); ctx.stroke();
+    } else if (st === 'ermek') {
+      // a few hairs peeking out under the hat
+      ctx.fillStyle = L.hair;
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(-24, -10, 9, 12, 0.3, 0, TAU); ctx.stroke(); ctx.fill();
+      // white felt kalpak with a black turned-up brim
+      ctx.fillStyle = '#fbf6ea';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(-31, -14);
+      ctx.quadraticCurveTo(-36, -48, -16, -66);
+      ctx.quadraticCurveTo(-4, -74, 7, -63);
+      ctx.quadraticCurveTo(23, -44, 29, -20);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = '#c9902f';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-14, -30); ctx.quadraticCurveTo(-10, -48, -4, -60);
+      ctx.moveTo(4, -30); ctx.quadraticCurveTo(4, -46, 0, -60);
+      ctx.stroke();
+      ctx.fillStyle = '#1d1a24';
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-34, -10);
+      ctx.quadraticCurveTo(-2, -30, 31, -15);
+      ctx.lineTo(29, -25);
+      ctx.quadraticCurveTo(-2, -40, -33, -21);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // the brim is split at the front
+      ctx.fillStyle = '#fbf6ea';
+      ctx.beginPath(); ctx.moveTo(19, -21); ctx.lineTo(25, -21); ctx.lineTo(23, -29); ctx.closePath(); ctx.fill();
     } else {
       // spiky hair + headband
       ctx.fillStyle = L.hair;
@@ -2443,6 +2565,8 @@ function bootGame() {
     ui.rightName.textContent = two ? t('p2') : t(d + 'Name');
     ui.rightSub.textContent = two ? t('redCorner') : t(d + 'Title').toUpperCase();
     ui.oppStory.innerHTML = `<b>${t(d + 'Name')}</b> · ${t(d + 'Title')}<br>${t(d + 'Story')}`;
+    rival.look = two ? LOOKS.aibek : OPPONENT_LOOKS[d];
+    ui.rightPlate.dataset.opp = two ? 'p2' : d;
     const keys = { left: two ? 'A' : t('spaceKey'), right: 'L' };
     for (const side of SIDES) {
       const m = ui.meters[side];
