@@ -471,6 +471,8 @@ kbd {
 }
 .nameplate.player { background: linear-gradient(#5aa2ff, #2264c4); align-items: flex-start; }
 .nameplate.ai { background: linear-gradient(#ff6f62, #c0261e); align-items: flex-end; text-align: right; }
+.nameplate.ai[data-opp="easy"] { background: linear-gradient(#ffb08a, #e0683f); }
+.nameplate.ai[data-opp="hard"] { background: linear-gradient(#6a2a30, #1c1218); box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 0 16px rgba(224, 57, 47, 0.55); }
 .np-name {
   font-family: var(--display);
   font-size: 30px;
