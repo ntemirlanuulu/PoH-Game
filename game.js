@@ -50,6 +50,15 @@ const BALANCE = {
     recoverAt: 30             // tired clears above this (hysteresis, no flicker)
   },
 
+  // 2-player mode only: two equal humans would otherwise hold the stick in the
+  // middle for ages. Stamina runs out sooner, a lead snowballs faster, and the
+  // stick sways a little so a perfect tie can't sit dead centre.
+  twoPlayer: {
+    leverage: 18,             // vs 4 in 1-player mode
+    sway: 5,                  // force units of slow random drift
+    stamina: { freeRate: 3, drainPerExcess: 0.75 }
+  },
+
   ai: {
     easy: {
       baseForce: 7,
@@ -172,11 +181,15 @@ function createAI(cfg, rng) {
 function createRound(difficulty, { mode = '1p', rng = Math.random } = {}) {
   const twoPlayer = mode === '2p';
   const cfg = twoPlayer ? null : BALANCE.ai[difficulty];
+  const TP = BALANCE.twoPlayer;
   return {
     mode,
     difficulty,
     cfg,
     rng,
+    stamina: twoPlayer ? Object.assign({}, BALANCE.stamina, TP.stamina) : BALANCE.stamina,
+    leverage: twoPlayer ? TP.leverage : BALANCE.leverage,
+    sway: twoPlayer ? { amp: TP.sway, phase: rng() * 100, freq: 0.5 + rng() * 0.4 } : null,
     time: 0,
     pullPosition: 0,
     pullVelocity: 0,
@@ -200,7 +213,7 @@ function registerPull(r, side = 'left') {
   if (r.winner) return false;
   const p = side === 'left' ? r.left : r.right;
   if (!p) return false; // the AI side cannot be pulled for
-  const S = BALANCE.stamina;
+  const S = r.stamina;
   if (p.lastTap >= 0) p.interval = lerp(p.interval, clamp(r.time - p.lastTap, 0.03, 1), S.rateSmoothing);
   p.lastTap = r.time;
   p.rate = 1 / p.interval;
@@ -318,7 +331,7 @@ function updateAI(r, dt) {
 }
 
 function stepPuller(r, p, side, dt) {
-  const B = BALANCE, S = B.stamina;
+  const B = BALANCE, S = r.stamina;
   p.force = Math.max(0, p.force - (B.forceDecay + p.force * B.forceDrag) * dt);
   if (r.time - p.lastDrain >= S.regenDelay) p.stamina = Math.min(S.max, p.stamina + S.regenRate * dt);
   if (p.tired && p.stamina >= S.recoverAt) {
@@ -344,7 +357,11 @@ function stepRound(r, dt) {
   // Positive net force → toward the right side (+100); negative → toward the left (−100).
   // Leverage: once a wrestler is dragged forward they lose purchase, so the
   // leader gets a small bonus. Keeps evenly matched rounds from stalling.
-  const netForce = sideForce(r, 'right') - sideForce(r, 'left') + B.leverage * (r.pullPosition / B.roundLimit);
+  let netForce = sideForce(r, 'right') - sideForce(r, 'left') + r.leverage * (r.pullPosition / B.roundLimit);
+  if (r.sway) {
+    const w = r.sway, t = r.time * w.freq + w.phase;
+    netForce += w.amp * (0.6 * Math.sin(t) + 0.4 * Math.sin(t * 2.3 + 1.7));
+  }
   const targetVelocity = clamp(netForce * B.positionScale, -B.maxPositionSpeed, B.maxPositionSpeed);
   r.pullVelocity += (targetVelocity - r.pullVelocity) * (1 - Math.exp(-B.positionDamping * dt));
   r.pullPosition = clamp(r.pullPosition + r.pullVelocity * dt, -B.roundLimit, B.roundLimit);
