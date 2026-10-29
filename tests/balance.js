@@ -53,24 +53,28 @@ function pct(x) { return (x * 100).toFixed(0).padStart(3) + '%'; }
 function median(a) { const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; }
 
 function staminaReport() {
-  const S = BALANCE.stamina;
-  log('STAMINA');
-  for (const rate of [6, 7, 7.5, 8]) {
-    // 2-player round with both sides tapping identically, so the stick stays put
-    const r = createRound(null, { mode: '2p', rng: mulberry32(1) });
-    let next = 0;
-    while (!r.left.tired && r.time < 300) {
-      if (r.time >= next) { registerPull(r, 'left'); registerPull(r, 'right'); next = r.time + 1 / rate; }
-      stepRound(r, DT);
+  for (const mode of ['1p', '2p']) {
+    const probe = createRound('easy', { mode, rng: mulberry32(1) });
+    const S = probe.stamina;
+    log(`STAMINA (${mode === '1p' ? '1 player' : '2 players'})`);
+    for (const rate of [6, 7, 7.5, 8]) {
+      // tap at a fixed rate with the stick held in the middle, so only stamina matters
+      const r = createRound('easy', { mode, rng: mulberry32(1) });
+      let next = 0;
+      while (!r.left.tired && r.time < 300) {
+        if (r.time >= next) { registerPull(r, 'left'); next = r.time + 1 / rate; }
+        r.pullPosition = 0; r.pullVelocity = 0;
+        stepRound(r, DT);
+      }
+      log(`  full stamina lasts ${r.left.tired ? r.time.toFixed(1) + ' s' : '> 300 s'} at ${rate} taps/s`);
     }
-    log(`  full stamina lasts ${r.left.tired ? r.time.toFixed(1) + ' s' : '> 300 s'} at ${rate} taps/s`);
+    for (const rate of [4, 4.5, 5]) {
+      const drainPerSec = Math.max(0, rate - S.freeRate) * S.drainPerExcess * rate;
+      log(`  ${rate} taps/s: ${drainPerSec ? 'empties in ' + (S.max / drainPerSec).toFixed(0) + ' s' : 'free'}`);
+    }
+    log(`  empty → full: ${(S.max / S.regenRate).toFixed(1)} s (+${S.regenDelay} s pause before refilling)`);
+    log(`  tired: pull strength x${S.tiredMultiplier} until stamina is back above ${S.recoverAt}`);
   }
-  for (const rate of [4, 4.5, 5]) {
-    const drainPerSec = Math.max(0, rate - S.freeRate) * S.drainPerExcess * rate;
-    log(`  ${rate} taps/s: ${drainPerSec ? 'empties in ' + (S.max / drainPerSec).toFixed(0) + ' s' : 'free'}`);
-  }
-  log(`  empty → full: ${(S.max / S.regenRate).toFixed(1)} s (+${S.regenDelay} s pause before refilling)`);
-  log(`  tired: pull strength x${S.tiredMultiplier} until stamina is back above ${S.recoverAt}`);
 }
 
 function balanceReport() {
@@ -89,6 +93,29 @@ function balanceReport() {
   }
 }
 
+function twoPlayerReport() {
+  log('\n2 PLAYERS   (median round length, slowest 10%, who wins)');
+  const pairs = [[4, 4], [5, 5], [6, 6], [8, 8], [5, 6], [6, 8]];
+  for (const [a, c] of pairs) {
+    const times = []; let p1 = 0;
+    for (let i = 0; i < ROUNDS; i++) {
+      const seed = 500 + i * 7919, rng = mulberry32(seed), hA = mulberry32(seed ^ 0x1234), hB = mulberry32(seed ^ 0x9876);
+      const r = createRound(null, { mode: '2p', rng });
+      let nA = 0.05 + hA() * 0.1, nB = 0.05 + hB() * 0.1;
+      while (!r.winner && r.time < TIMEOUT) {
+        if (r.time >= nA) { registerPull(r, 'left'); nA = r.time + (1 / a) * (0.88 + hA() * 0.24); }
+        if (r.time >= nB) { registerPull(r, 'right'); nB = r.time + (1 / c) * (0.88 + hB() * 0.24); }
+        stepRound(r, DT);
+      }
+      if (r.winner === 'left') p1++;
+      times.push(r.time);
+    }
+    times.sort((x, y) => x - y);
+    log(`  P1 ${a} vs P2 ${c} taps/s   ${median(times).toFixed(1).padStart(4)} s   ${times[Math.floor(ROUNDS * 0.9)].toFixed(0).padStart(3)} s   P1 wins ${pct(p1 / ROUNDS)}`);
+  }
+}
+
 staminaReport();
 balanceReport();
+twoPlayerReport();
 })();
