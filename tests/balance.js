@@ -60,6 +60,7 @@ function staminaReport() {
     for (const rate of [6, 7, 7.5, 8]) {
       // tap at a fixed rate with the stick held in the middle, so only stamina matters
       const r = createRound('easy', { mode, rng: mulberry32(1) });
+      r.roundTime = Infinity; // no 2-player timer while measuring
       let next = 0;
       while (!r.left.tired && r.time < 300) {
         if (r.time >= next) { registerPull(r, 'left'); next = r.time + 1 / rate; }
@@ -94,24 +95,35 @@ function balanceReport() {
 }
 
 function twoPlayerReport() {
-  log('\n2 PLAYERS   (median round length, slowest 10%, who wins)');
-  const pairs = [[4, 4], [5, 5], [6, 6], [8, 8], [5, 6], [6, 8]];
-  for (const [a, c] of pairs) {
-    const times = []; let p1 = 0;
+  log('\n2 PLAYERS   (median round length, % decided by the timer, how often Player 1 wins)');
+  // a player is a tap rate (taps/s) that may depend on the situation, plus a start delay
+  const steady = (rate, start = 0) => ({ rate: () => rate, start });
+  const smart = () => ({ rate: (me, them) => (them.tired || me.stamina > 70 ? 8 : 5), start: 0 });
+  const matchups = [
+    ['equal 5 vs 5', steady(5), steady(5)],
+    ['equal 6 vs 6', steady(6), steady(6)],
+    ['P1 starts 0.4 s early', steady(5), steady(5, 0.4)],
+    ['P1 5 vs P2 5.5', steady(5), steady(5.5)],
+    ['P1 5 vs P2 6', steady(5), steady(6)],
+    ['P1 sprints 8 vs steady 5.5', steady(8), steady(5.5)],
+    ['P1 smart vs sprinter 8', smart(), steady(8)]
+  ];
+  for (const [label, A, C] of matchups) {
+    const times = []; let p1 = 0, timeUps = 0;
     for (let i = 0; i < ROUNDS; i++) {
       const seed = 500 + i * 7919, rng = mulberry32(seed), hA = mulberry32(seed ^ 0x1234), hB = mulberry32(seed ^ 0x9876);
       const r = createRound(null, { mode: '2p', rng });
-      let nA = 0.05 + hA() * 0.1, nB = 0.05 + hB() * 0.1;
+      let nA = 0.05 + A.start + hA() * 0.1, nB = 0.05 + C.start + hB() * 0.1;
       while (!r.winner && r.time < TIMEOUT) {
-        if (r.time >= nA) { registerPull(r, 'left'); nA = r.time + (1 / a) * (0.88 + hA() * 0.24); }
-        if (r.time >= nB) { registerPull(r, 'right'); nB = r.time + (1 / c) * (0.88 + hB() * 0.24); }
+        if (r.time >= nA) { registerPull(r, 'left'); nA = r.time + (1 / A.rate(r.left, r.right)) * (0.88 + hA() * 0.24); }
+        if (r.time >= nB) { registerPull(r, 'right'); nB = r.time + (1 / C.rate(r.right, r.left)) * (0.88 + hB() * 0.24); }
         stepRound(r, DT);
       }
       if (r.winner === 'left') p1++;
+      if (r.timeUp) timeUps++;
       times.push(r.time);
     }
-    times.sort((x, y) => x - y);
-    log(`  P1 ${a} vs P2 ${c} taps/s   ${median(times).toFixed(1).padStart(4)} s   ${times[Math.floor(ROUNDS * 0.9)].toFixed(0).padStart(3)} s   P1 wins ${pct(p1 / ROUNDS)}`);
+    log(`  ${label.padEnd(28)} ${median(times).toFixed(1).padStart(4)} s   timer ${pct(timeUps / ROUNDS)}   P1 wins ${pct(p1 / ROUNDS)}`);
   }
 }
 
