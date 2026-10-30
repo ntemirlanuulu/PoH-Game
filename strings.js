@@ -68,7 +68,8 @@ const STRINGS = {
       fact7: "Traditional Kyrgyz yurt-making skills were added to UNESCO's Intangible Cultural Heritage list in 2014.",
       fact8: 'Strength games like stick pulling were popular during Nooruz, the spring festival celebrated around March 21.',
       // --- V3: phone ---
-      rotateTitle: 'ROTATE YOUR PHONE', rotateText: 'Tayak Tartysh is played sideways. Turn your phone to landscape.'
+      rotateTitle: 'ROTATE YOUR PHONE', rotateText: 'Tayak Tartysh is played sideways. Turn your phone to landscape.',
+    timeUp: 'TIME!', twoPRule: 'Rounds last {s} seconds. When time runs out, whoever has the stick on their side wins.'
   },
   de: {
     code: 'DE',
@@ -181,7 +182,8 @@ const STRINGS = {
     fact7: 'Die traditionelle Kunst des kirgisischen Jurtenbaus wurde 2014 in die UNESCO-Liste des immateriellen Kulturerbes aufgenommen.',
     fact8: 'Kraftspiele wie das Stockziehen waren beim Nooruz beliebt, dem Frühlingsfest um den 21. März.',
     rotateTitle: 'DREH DEIN HANDY',
-    rotateText: 'Tayak Tartysh wird quer gespielt. Dreh dein Handy ins Querformat.'
+    rotateText: 'Tayak Tartysh wird quer gespielt. Dreh dein Handy ins Querformat.',
+    timeUp: 'ZEIT!', twoPRule: 'Eine Runde dauert {s} Sekunden. Läuft die Zeit ab, gewinnt, wer den Stock auf seiner Seite hat.'
   },
   ky: {
     code: 'KG', title: 'ТАЯК ТАРТЫШ', subtitle: 'Көчмөндөрдүн күч сынашуусу', play: 'ОЙНОО',
@@ -246,7 +248,8 @@ const STRINGS = {
       fact7: 'Кыргыз боз үйүн жасоонун салттуу чеберчилиги 2014-жылы ЮНЕСКОнун материалдык эмес маданий мурастар тизмесине киргизилген.',
       fact8: 'Таяк тартыш сыяктуу күч оюндары 21-мартка жакын белгиленүүчү жазгы майрам — Ноорузда абдан популярдуу болгон.',
       // --- V3: phone ---
-      rotateTitle: 'ТЕЛЕФОНДУ БУР', rotateText: 'Таяк Тартыш туурасынан ойнолот. Телефонуңду туурасынан бур.'
+      rotateTitle: 'ТЕЛЕФОНДУ БУР', rotateText: 'Таяк Тартыш туурасынан ойнолот. Телефонуңду туурасынан бур.',
+    timeUp: 'УБАКЫТ БҮТТҮ!', twoPRule: 'Раунд {s} секундга созулат. Убакыт бүткөндө таяк кимдин тарабында болсо, ошол жеңет.'
   },
   ru: {
     code: 'RU', title: 'ТАЯК ТАРТЫШ', subtitle: 'Испытание силы кочевников', play: 'ИГРАТЬ',
@@ -311,7 +314,8 @@ const STRINGS = {
       fact7: 'Традиционное мастерство изготовления кыргызской юрты в 2014 году внесено в список нематериального культурного наследия ЮНЕСКО.',
       fact8: 'Силовые игры вроде перетягивания палки были популярны на Нооруз — весеннем празднике, который отмечают около 21 марта.',
       // --- V3: phone ---
-      rotateTitle: 'ПОВЕРНИ ТЕЛЕФОН', rotateText: 'В «Таяк Тартыш» играют горизонтально. Поверни телефон.'
+      rotateTitle: 'ПОВЕРНИ ТЕЛЕФОН', rotateText: 'В «Таяк Тартыш» играют горизонтально. Поверни телефон.',
+    timeUp: 'ВРЕМЯ!', twoPRule: 'Раунд длится {s} секунд. Когда время выйдет, побеждает тот, на чьей стороне палка.'
   },
   zh: {
     code: '中文', title: '拔棍大赛', subtitle: '游牧民族的力量较量', play: '开始游戏',
@@ -376,6 +380,7 @@ const STRINGS = {
       fact7: '吉尔吉斯传统毡房制作技艺于2014年被列入联合国教科文组织人类非物质文化遗产名录。',
       fact8: '拔棍这类力量游戏在诺鲁孜节——每年3月21日前后庆祝的春季节日——期间十分流行。',
       // --- V3: phone ---
-      rotateTitle: '请横屏', rotateText: '本游戏需要横屏游玩，请旋转你的手机。'
+      rotateTitle: '请横屏', rotateText: '本游戏需要横屏游玩，请旋转你的手机。',
+    timeUp: '时间到！', twoPRule: '每局{s}秒。时间到时，木棍在谁那一边，谁就获胜。'
   }
 };
