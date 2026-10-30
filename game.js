@@ -50,13 +50,23 @@ const BALANCE = {
     recoverAt: 30             // tired clears above this (hysteresis, no flicker)
   },
 
-  // 2-player mode only: two equal humans would otherwise hold the stick in the
-  // middle for ages. Stamina runs out sooner, a lead snowballs faster, and the
-  // stick sways a little so a perfect tie can't sit dead centre.
+  // 2-player mode only. Nothing random and no snowballing: only the taps decide.
+  //  - a higher force cap, so faster tapping keeps paying off (skill expression)
+  //  - a short stamina pool that refills fast: burst, recover, strike when the
+  //    other player is tired
+  //  - a capped pull back toward the middle, so a lucky early lead fades but a
+  //    genuinely stronger player still drags the stick all the way
+  //  - a round timer: when it runs out, whoever has the stick on their side wins
   twoPlayer: {
-    leverage: 18,             // vs 4 in 1-player mode
-    sway: 5,                  // force units of slow random drift
-    stamina: { freeRate: 3, drainPerExcess: 0.75 }
+    maxForce: 30,
+    positionScale: 5,         // the stick reacts faster than against the AI
+    maxPositionSpeed: 60,
+    leverage: 0,              // no snowballing
+    centering: 2,             // a small pull back toward the middle, capped at this force...
+    centeringWidth: 25,       // ...reached this far from the middle: a head start fades, a stronger player still wins
+    gripTime: 1.0,            // after PULL! the stick is held while both players take their grip
+    roundTime: 15,            // seconds
+    stamina: { freeRate: 4.5, drainPerExcess: 0.9, regenRate: 34, regenDelay: 0.3 }
   },
 
   ai: {
@@ -189,7 +199,14 @@ function createRound(difficulty, { mode = '1p', rng = Math.random } = {}) {
     rng,
     stamina: twoPlayer ? Object.assign({}, BALANCE.stamina, TP.stamina) : BALANCE.stamina,
     leverage: twoPlayer ? TP.leverage : BALANCE.leverage,
-    sway: twoPlayer ? { amp: TP.sway, phase: rng() * 100, freq: 0.5 + rng() * 0.4 } : null,
+    centering: twoPlayer ? TP.centering : 0,
+    centeringWidth: twoPlayer ? TP.centeringWidth : 1,
+    maxForce: twoPlayer ? TP.maxForce : BALANCE.maxForce,
+    positionScale: twoPlayer ? TP.positionScale : BALANCE.positionScale,
+    maxPositionSpeed: twoPlayer ? TP.maxPositionSpeed : BALANCE.maxPositionSpeed,
+    roundTime: twoPlayer ? TP.roundTime : Infinity,
+    gripTime: twoPlayer ? TP.gripTime : 0,
+    timeUp: false,
     time: 0,
     pullPosition: 0,
     pullVelocity: 0,
@@ -226,7 +243,7 @@ function registerPull(r, side = 'left') {
   const k = p.tired ? S.tiredMultiplier : 1;
   // A tired puller already above the lowered cap keeps that force (it decays
   // naturally) but cannot add to it.
-  p.force = Math.min(p.force + BALANCE.pullImpulse * k, Math.max(p.force, BALANCE.maxForce * k));
+  p.force = Math.min(p.force + BALANCE.pullImpulse * k, Math.max(p.force, r.maxForce * k));
   return true;
 }
 
@@ -355,14 +372,13 @@ function stepRound(r, dt) {
   if (r.right) stepPuller(r, r.right, 'right', dt);
 
   // Positive net force → toward the right side (+100); negative → toward the left (−100).
-  // Leverage: once a wrestler is dragged forward they lose purchase, so the
-  // leader gets a small bonus. Keeps evenly matched rounds from stalling.
-  let netForce = sideForce(r, 'right') - sideForce(r, 'left') + r.leverage * (r.pullPosition / B.roundLimit);
-  if (r.sway) {
-    const w = r.sway, t = r.time * w.freq + w.phase;
-    netForce += w.amp * (0.6 * Math.sin(t) + 0.4 * Math.sin(t * 2.3 + 1.7));
-  }
-  const targetVelocity = clamp(netForce * B.positionScale, -B.maxPositionSpeed, B.maxPositionSpeed);
+  // Leverage (1 player): the leader gets a small bonus, which keeps evenly
+  // matched rounds from stalling. Centering (2 players): a capped pull back
+  // toward the middle, so a lucky early lead fades instead of deciding the round.
+  const netForce = sideForce(r, 'right') - sideForce(r, 'left') + r.leverage * (r.pullPosition / B.roundLimit)
+    - r.centering * clamp(r.pullPosition / r.centeringWidth, -1, 1);
+  // during the grip phase taps build pulling power but the stick stays put, so tapping first is no advantage
+  const targetVelocity = r.time < r.gripTime ? 0 : clamp(netForce * r.positionScale, -r.maxPositionSpeed, r.maxPositionSpeed);
   r.pullVelocity += (targetVelocity - r.pullVelocity) * (1 - Math.exp(-B.positionDamping * dt));
   r.pullPosition = clamp(r.pullPosition + r.pullVelocity * dt, -B.roundLimit, B.roundLimit);
 
@@ -372,6 +388,12 @@ function stepRound(r, dt) {
   } else if (r.pullPosition >= B.roundLimit) {
     r.winner = 'right';
     r.events.push({ type: 'win', winner: 'right' });
+  } else if (r.time >= r.roundTime) {
+    // time is up: the stick's side decides (an exact tie goes to whoever pulls harder right now)
+    const lean = r.pullPosition || (sideForce(r, 'right') - sideForce(r, 'left')) || 1;
+    r.timeUp = true;
+    r.winner = lean < 0 ? 'left' : 'right';
+    r.events.push({ type: 'win', winner: r.winner, timeUp: true });
   }
 }
 
@@ -436,7 +458,7 @@ function bootGame() {
     countdown: $('countdown'), roundLabel: $('roundLabel'), scoreLabel: $('scoreLabel'),
     playerPips: $('playerPips'), aiPips: $('aiPips'), tug: $('tug'), tugFill: $('tugFill'), tugMarker: $('tugMarker'),
     alert: $('alert'), leftName: $('leftName'), rightName: $('rightName'), rightSub: $('rightSub'),
-    rightPlate: document.querySelector('.nameplate.ai'),
+    rightPlate: document.querySelector('.nameplate.ai'), roundTimer: $('roundTimer'), twoPRule: $('twoPRule'),
     meters: { left: meterRefs($('meterL')), right: meterRefs($('meterR')) },
     touchZones: $('touchZones'), tzLeft: $('tzLeft'), tzRight: $('tzRight'),
     roundTitle: $('roundTitle'), roundSub: $('roundSub'), nextBtn: $('nextBtn'), roundHint: $('roundHint'),
@@ -2591,6 +2613,7 @@ function bootGame() {
       m.key.classList.toggle('wide', !two);
       m.hint.textContent = touch ? t('tapToPull') : t('toPull');
     }
+    ui.twoPRule.textContent = t('twoPRule', { s: B.twoPlayer.roundTime });
     ui.tzLeft.textContent = touch ? t('tapHere', { p: t('p1') }) : t('pressKey', { p: t('p1'), k: 'A' });
     ui.tzRight.textContent = touch ? t('tapHere', { p: t('p2') }) : t('pressKey', { p: t('p2'), k: 'L' });
     document.querySelectorAll('.np-name').forEach((el) => fitText(el, el.parentElement.clientWidth - 24));
@@ -2674,6 +2697,10 @@ function bootGame() {
     else Sound.roundLose();
     Sound.grunt(winner === 'right');
     spawnDust(ARENA.boardX, ARENA.groundY - 4, 14, 120);
+    if (game.sim.timeUp) {
+      addPopup(t('timeUp'), ARENA.boardX, 300, '#ffd23f', 46);
+      Sound.go();
+    }
     const loser = winner === 'left' ? rival : player;
     addPopup(cheer ? t('popYes') : t('popOof'), loser.pose.head.x, loser.pose.head.y - 70, winner === 'left' ? '#7cc2ff' : '#ff6a5c', 38);
   }
@@ -2811,7 +2838,7 @@ function bootGame() {
     const puller = side === 'left' ? r.left : r.right;
     w.kick = Math.min(1.4, w.kick + 0.7);
     stick.nudge += side === 'left' ? -2.2 : 2.2;
-    Sound.pull(puller.force / B.maxForce);
+    Sound.pull(puller.force / r.maxForce);
     if (tp.count % 8 === 0) Sound.grunt(side === 'right');
     if (w.pose) spawnPuff(w.pose.hands[1].x, w.pose.hands[1].y);
     const key = ui.meters[side].key;
@@ -2832,8 +2859,8 @@ function bootGame() {
       if (st === S.COUNTDOWN) {
         pEff = 0.22; aEff = 0.22;
       } else {
-        pEff = r.left.force / B.maxForce;
-        aEff = r.right ? r.right.force / B.maxForce : r.aiForce / (r.cfg.baseForce + r.cfg.attackBonus);
+        pEff = r.left.force / r.maxForce;
+        aEff = r.right ? r.right.force / r.maxForce : r.aiForce / (r.cfg.baseForce + r.cfg.attackBonus);
         if (st === S.PLAYING) {
           aiInfo = r.ai;
           tiredL = r.left.tired;
@@ -2939,7 +2966,7 @@ function bootGame() {
       const puller = side === 'left' ? r.left : r.right;
       if (!puller) continue;
       const m = ui.meters[side], tp = game.taps[side];
-      m.power.style.width = (puller.force / B.maxForce) * 100 + '%';
+      m.power.style.width = (puller.force / r.maxForce) * 100 + '%';
       const level = puller.stamina / B.stamina.max;
       m.stamina.style.width = level * 100 + '%';
       const band = puller.tired || level <= 0.25 ? 'low' : level <= 0.55 ? 'mid' : 'high';
@@ -2950,7 +2977,12 @@ function bootGame() {
       tp.rate = lerp(tp.rate, raw, 0.15);
       m.rate.textContent = tp.rate.toFixed(1);
     }
-    if (r.ai) ui.meters.left.tick.style.left = clamp((r.aiForce / B.maxForce) * 100, 0, 100) + '%';
+    if (r.ai) ui.meters.left.tick.style.left = clamp((r.aiForce / r.maxForce) * 100, 0, 100) + '%';
+    if (isFinite(r.roundTime)) {
+      const left = Math.max(0, Math.ceil(r.roundTime - r.time));
+      if (ui.roundTimer.textContent !== String(left)) ui.roundTimer.textContent = left;
+      ui.roundTimer.classList.toggle('urgent', game.state === S.PLAYING && left <= 5);
+    }
 
     // AI warnings (1 player only)
     let text = '', cls = '';
