@@ -1163,3 +1163,24 @@ kbd.key-red { background: #ffd0c9; }
 .diff-btn b, .diff-btn .opp-name { display: block; max-width: 100%; }
 /* phones: keep NEXT ROUND clear of the fact card by centring it in the space to its right */
 .compact #roundEnd .result-actions { left: 500px; right: 110px; }
+
+/* 2-player round timer */
+.round-timer {
+  display: none;
+  min-width: 64px;
+  padding: 0 12px 2px;
+  border-radius: 12px;
+  border: 3px solid var(--ink);
+  background: rgba(30, 18, 50, 0.6);
+  font-family: var(--display);
+  font-size: 28px;
+  letter-spacing: 1px;
+  text-align: center;
+  color: #fff;
+  -webkit-text-stroke: 4px var(--ink);
+  paint-order: stroke fill;
+}
+.mode-2p .round-timer { display: inline-block; }
+.round-timer.urgent { color: #ff6a5c; background: rgba(120, 20, 20, 0.75); animation: alertPulse 0.5s ease-in-out infinite alternate; }
+.compact .round-timer { font-size: 36px; min-width: 80px; }
+.twop-rule { color: var(--gold); }
